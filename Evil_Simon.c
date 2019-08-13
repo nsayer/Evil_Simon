@@ -1,4 +1,3 @@
-
 /*
 
     Evil Simon
@@ -62,6 +61,8 @@
 // While it's the player's turn, wait 10 seconds before giving up on him
 #define TURN_TIMEOUT (10 * F_TICK)
 
+#define BLANK_DISPLAY (memset(&disp_buf, 0, sizeof(disp_buf)))
+
 // Thanks to Gareth Evans at http://todbot.com/blog/2008/06/19/how-to-do-big-strings-in-arduino/
 // Note that you must be careful not to use this macro more than once per "statement", lest you
 // risk overwriting the buffer before it is used. So no using it inside methods that return
@@ -120,7 +121,7 @@ unsigned long ticks() {
 
 static void __ATTR_NORETURN__ power_off(void) {
 	eeprom_update_dword(EE_RAND_SEED, random());
-	PORTC.DIRCLR = _BV(0); // make the power pin suddenly go Hi-Z.
+	PORTC.DIRCLR = _BV(0); // make the power pin Hi-Z. The pull-up will turn power off.
 	while(1) wdt_reset(); // wait patiently for death
 	__builtin_unreachable();
 }
@@ -314,7 +315,7 @@ void __ATTR_NORETURN__ main(void) {
         PORTC.PIN6CTRL = PORT_OPC_PULLUP_gc; // pull MISO up
 
         // TCC4 is an 8 kHz clock for triggering DMA to the DAC for audio
-        // playback.
+        // playback. It's also a tick counter for events and stuff.
         TCC4.CTRLA = TC45_CLKSEL_DIV8_gc; // 2 MHz timer clocking.
         TCC4.CTRLB = 0;
         TCC4.CTRLC = 0;
@@ -365,12 +366,17 @@ void __ATTR_NORETURN__ main(void) {
         EDMA.CH2.ADDR = (unsigned int)&(audio_buf[1]);
 
 	// clear the display buffer
-	memset(&disp_buf, 0, sizeof(disp_buf));
+	BLANK_DISPLAY;
 
-	last_button_state = 0;
+	// Since we just got turned on, a button is probably being held right now.
+	// Don't count that press.
+	last_button_state = (((PORTA.IN & 0xf0) ^ 0xf0) >> 4);
+	debounce_start = 0;
 
+	// Seed the PRNG from our last power-off state.
 	srandom(eeprom_read_dword(EE_RAND_SEED));
 
+	// Release the hounds!
 	PMIC.CTRL = PMIC_LOLVLEN_bm | PMIC_MEDLVLEN_bm | PMIC_HILVLEN_bm;
 	sei();
 
@@ -378,8 +384,6 @@ void __ATTR_NORETURN__ main(void) {
 		fail(1);
         }
 
-	unsigned char level, step;
-	unsigned char pattern[256];
 	while(1) {
 
 		// Attract mode
@@ -390,22 +394,48 @@ void __ATTR_NORETURN__ main(void) {
 			unsigned long now = ticks();
 			if (now - wait_start > SLEEP_TIMEOUT) {
 				// clear the display
-				memset(&disp_buf, 0, sizeof(disp_buf));
+				BLANK_DISPLAY;
 				// Zzzzzzz
 				power_off();
 				__builtin_unreachable();
 			}
-			unsigned char light = ((now - wait_start) / F_TICK) % 4;
+			unsigned char light = ((now - wait_start) / (F_TICK / 4)) % 4;
 			for(int i = 0; i < 4; i++) {
 				disp_buf[i] = (i == light)? (i + 1) : BLACK;
 			}
 			if ((game_select = get_buttons())) break;
 		}
 
-		memset(&disp_buf, 0, sizeof(disp_buf));
+		BLANK_DISPLAY;
 
+		// Translate the button push into a difficulty level.
+		// Level 0 is ordinary Simon.
+		// Level 1 shifts the positions around
+		// Level 2 shifts the sounds around
+		// Level 3 shifts the home colors around every turn.
+		// Level 4 shofts the home colors around even within a turn.
+
+		switch(game_select) {
+			case 1 << (GREEN - 1):
+				game_select = 0;
+				break;
+			case 1 << (BLUE - 1):
+				game_select = 1;
+				break;
+			case 1 << (YELLOW - 1):
+				game_select = 2;
+				break;
+			case 1 << (RED - 1):
+				game_select = 3;
+				break;
+			default: // This must have been a chord.
+				game_select = 4;
+				break;
+		}
 		// Start the game
-		level = 0;
+		unsigned char level = 0, step;
+		unsigned char pattern[256];
+		unsigned char home_row[4];
 
 		// game loop
 		while(1) {
@@ -416,26 +446,53 @@ void __ATTR_NORETURN__ main(void) {
 				level = 0;
 				goto game_over;
 			}
-			pattern[level++] = random() % 0x40;
+			pattern[level] = random() % 0x40; // from 0b000000 to 0b111111
+			if (game_select < 2) { // At levels less than 2, the sounds become consistent.
+				// Copy the color to the sound
+				pattern[level] = (pattern[level] & 0b110011) | (MOVE_COLOR(pattern[level]) << 2);
+			}
+			if (game_select < 1) { // At levels less than 1, the positions become consistent.
+				// Copy the color to the position
+				pattern[level] = (pattern[level] & 0b001111) | (MOVE_COLOR(pattern[level]) << 4);
+			}
+			level++;
 			// My turn
 			for(int i = 0; i < level; i++) {
 				disp_buf[MOVE_POS(pattern[i])] = MOVE_COLOR(pattern[i]) + 1;
 				fname[0] = '1' + MOVE_SOUND(pattern[i]);
 				play_file(fname);
-				while(audio_poll()) wdt_reset();
+				// How long we show depends on how far we've gone.
+				// Start at 2 seconds, reduce by a quarter second every 2nd level, minimum 1/4 sec.
+				unsigned long play_time = F_TICK * 2 - ((level /2) * (F_TICK / 4));
+				if (play_time < (F_TICK / 4)) play_time = F_TICK / 4;
+				for(unsigned long start = ticks(); ticks() - start < play_time; ) audio_poll();
 				disp_buf[MOVE_POS(pattern[i])] = 0;
 				// pause 100 msec
 				for(unsigned long delay_start = ticks(); ticks() - delay_start > (F_TICK / 10); ) wdt_reset();
 			}
+
 			// Their turn
+			for(int i = 0; i < 4; i++) home_row[i] = i;
+
 			for(step = 0; step < level; step++) {
+				// for game level 3, perturb the user's button colors once.
+				// for game level 4, perturb the user's button colors constantly.
+				if (game_select >= 4 || (game_select >= 3 && step == 0)) {
+					// do a 4 position knuth shuffle
+					for(int i = 0; i < 3; i++) {
+						int j = (random() % (4 - i)) + i; // random number i through 3 inclusive
+						unsigned char swap = home_row[i];
+						home_row[i] = home_row[j];
+						home_row[j] = swap;
+					}
+				}
 				unsigned long wait_start = ticks();
 				unsigned char buttons;
 				while((!(buttons = get_buttons())) && (ticks() - wait_start < TURN_TIMEOUT)) {
 					audio_poll();
 					if (ticks() - wait_start > (F_TICK / 4)) {
 						// The feedback is done, so put the home pattern back
-						for(int i = 0; i < 4; i++) disp_buf[i] = i + 1;
+						for(int i = 0; i < 4; i++) disp_buf[i] = home_row[i] + 1;
 					}
 					wdt_reset();
 				}
@@ -454,17 +511,21 @@ void __ATTR_NORETURN__ main(void) {
 						move = 3;
 						break;
 					default:
-						goto game_over; // TIME OUT!!!
+						goto game_over; // either a chord or time out.
 				}
+				move = home_row[move]; // translate it into its displayed color
 				if (MOVE_COLOR(pattern[step]) != move) goto game_over; // WRONG!!!
-				memset(&disp_buf, 0, sizeof(disp_buf));
+				BLANK_DISPLAY;
 				// Light up what they pushed
 				disp_buf[MOVE_COLOR(pattern[step])] = MOVE_COLOR(pattern[step]) + 1;
 				fname[0] = '1' + MOVE_COLOR(pattern[step]);
 				play_file(fname);
 			}
-			while(audio_poll()) wdt_reset();
-			memset(&disp_buf, 0, sizeof(disp_buf));
+			for(unsigned long start = ticks(); ticks() - start < F_TICK / 4; ) audio_poll(); // show their button for 1/4 sec
+			for(int i = 0; i < 4; i++) disp_buf[i] = home_row[i] + 1; // show the last home colors
+			while(audio_poll()) ; // Finish up the last chime
+			BLANK_DISPLAY;
+			// wait a second
 			for(unsigned long wait = ticks(); ticks() - wait < F_TICK; ) wdt_reset();
 		}
 
@@ -472,18 +533,34 @@ game_over:
 		// game over
 		if (level != 0) {
 			// YOU LOSE!! HAHAHAHAHAHAHAHA!!
-			memset(&disp_buf, 0, sizeof(disp_buf));
+			unsigned char color = MOVE_COLOR(pattern[step]); // The color they should have hit
+			unsigned char pos = 0;
+			for(int i = 0; i < 4; i++) if (home_row[i] == color) pos = i; // where they were supposed to hit.
+			BLANK_DISPLAY;
 			unsigned long lose_start = ticks();
 			play_file(P("LOSE"));
 			// Show them what they were supposed to push
 			while(audio_poll()) {
 				if (((ticks() - lose_start) / (F_TICK / 4)) % 2)
-					disp_buf[MOVE_COLOR(pattern[step])] = MOVE_COLOR(pattern[step]) + 1;
+					disp_buf[pos] = color + 1;
 				else
-					disp_buf[MOVE_COLOR(pattern[step])] = 0;
+					disp_buf[pos] = 0;
 			}
+			BLANK_DISPLAY;
 		} else {
-			// XXX they win.
+			// you win.
+			BLANK_DISPLAY;
+			unsigned long win_start = ticks();
+			play_file(P("WIN"));
+			while(audio_poll()) {
+				for(int i = 0; i < 4; i++) {
+					if (((ticks() - win_start) / (F_TICK / 2)) % 2)
+						disp_buf[i] = i + 1;
+					else
+						disp_buf[i] = 0;
+				}
+			}
+			BLANK_DISPLAY;
 		}
 
 	}
