@@ -189,7 +189,10 @@ static unsigned char audio_poll(void) {
 		// If there's no more file reading to do, we may still
 		// need to wait for the other buffer before marking
 		// playback all the way done.
-		if ((EDMA.STATUS & (EDMA_CH2BUSY_bm | EDMA_CH0BUSY_bm)) == 0) audio_playing = 0;
+		if ((EDMA.STATUS & (EDMA_CH2BUSY_bm | EDMA_CH0BUSY_bm)) == 0) {
+			DACA.CTRLA &= ~(DAC_CH0EN_bm);
+			audio_playing = 0;
+		}
 		return audio_playing;
 	}
 	unsigned int cnt = read_audio((void *)(audio_buf[chan]), sizeof(audio_buf[chan]));
@@ -232,6 +235,7 @@ static void play_file(char *filename) {
 
 	// We're certainly going to play *something* at this point
 	audio_playing = 1;
+	DACA.CTRLA |= DAC_CH0EN_bm;
         EDMA.CH0.TRFCNT = cnt;
         EDMA.CH0.CTRLA |= EDMA_CH_ENABLE_bm; // start
         if (cnt != sizeof(audio_buf[0])) {
@@ -329,7 +333,7 @@ void __ATTR_NORETURN__ main(void) {
         EVSYS.CH0MUX = EVSYS_CHMUX_TCC4_OVF_gc;
         EVSYS.CH0CTRL = 0;
 
-        DACA.CTRLA = DAC_CH0EN_bm | DAC_ENABLE_bm;
+        DACA.CTRLA = DAC_ENABLE_bm;
         DACA.CTRLB = DAC_CHSEL_SINGLE_gc | DAC_CH0TRIG_bm; // Trigger a conversion on event 0 - from the 8 kHz timer
         DACA.CTRLC = DAC_REFSEL_AVCC_gc | DAC_LEFTADJ_bm; // lop off the low 4 bits of each sample
         DACA.EVCTRL = DAC_EVSEL_0_gc; // trigger event 0
