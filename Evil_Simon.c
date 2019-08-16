@@ -316,7 +316,6 @@ void __ATTR_NORETURN__ main(void) {
 
         PORTC.OUTSET = _BV(4); // !SD_CS defaults to high
         PORTC.DIRSET = _BV(4) | _BV(5) | _BV(7); // !SD_CS and most of SPI is output
-        PORTC.PIN6CTRL = PORT_OPC_PULLUP_gc; // pull MISO up
 
         // TCC4 is an 8 kHz clock for triggering DMA to the DAC for audio
         // playback. It's also a tick counter for events and stuff.
