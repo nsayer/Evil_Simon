@@ -63,6 +63,15 @@
 
 #define BLANK_DISPLAY (memset(&disp_buf, 0, sizeof(disp_buf)))
 
+// This is the division factor for converting the 8 kHz tick interrupt into the LED raster rate.
+// The tension here is that the lower the raster rate, the less potential audio interference
+// there may be.
+#define RASTER_RATE (10)
+
+// This is the number of RASTER_RATE time periods each LED gets. One of them has the lights on,
+// the rest are dead. So increasing this number dims the LEDs.
+#define DIM_FACTOR (3)
+
 // Thanks to Gareth Evans at http://todbot.com/blog/2008/06/19/how-to-do-big-strings-in-arduino/
 // Note that you must be careful not to use this macro more than once per "statement", lest you
 // risk overwriting the buffer before it is used. So no using it inside methods that return
@@ -81,18 +90,24 @@ unsigned char more_audio, audio_playing;
 unsigned char last_button_state;
 unsigned long debounce_start;
 
+// How many possible "win" and "lose" audio tracks are there?
+unsigned long lose_max, win_max;
+
 // PFF's structure
 FATFS fatfs;
 
 // ticks counter and display raster ISR
 ISR(TCC4_OVF_vect) {
-        TCC4.INTFLAGS = TC4_OVFIF_bm; // ack
-	if (++ticks_cnt == 0) ticks_cnt++; // it must never be zero.
+	TCC4.INTFLAGS = TC4_OVFIF_bm; // ack
+	ticks_cnt++;
 
 	static unsigned char disp_num;
+
+	if (ticks_cnt % RASTER_RATE) return; // Make the basic refresh rate 100 Hz - 800 Hz over 8 slots.
+
 	PORTD.OUTSET = 0xf0; // turn all the digits off.
 	PORTD.OUTCLR = 0x07; // turn all the color pins off.
-	if (ticks_cnt % 4) return; // Only go at 25% duty cycle
+	if ((ticks_cnt / RASTER_RATE) % DIM_FACTOR) return; // Every LED gets one lit slot and N dark slots.
 	if (++disp_num >= 4) disp_num = 0;
 	switch(disp_buf[disp_num]) {
 		case RED:
@@ -112,11 +127,11 @@ ISR(TCC4_OVF_vect) {
 }
 
 unsigned long ticks() {
-        unsigned long out;
-        ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
-                out = ticks_cnt;
-        }
-        return out;
+	unsigned long out;
+	ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+		out = ticks_cnt;
+	}
+	return out;
 }
 
 static void __ATTR_NORETURN__ power_off(void) {
@@ -127,9 +142,12 @@ static void __ATTR_NORETURN__ power_off(void) {
 }
 
 static void __ATTR_NORETURN__ fail(unsigned char type) {
-	// announce the failure
-
-	// XXX TODO
+	cli(); // No more rastering.
+	// announce the failure - white 4 bit binary value
+	PORTD.OUTSET = 7;
+	PORTD.OUTCLR = 8;
+	PORTD.OUTSET = 0xf0;
+	PORTD.OUTCLR = type << 4;
 
 	while(1) wdt_reset(); // wait forever
 	__builtin_unreachable();
@@ -223,41 +241,44 @@ static void play_file(char *filename) {
 		fail(2);
 	}
 	while(EDMA.STATUS & (EDMA_CH0BUSY_bm | EDMA_CH2BUSY_bm)) ; // wait for abort - should be nothing
-	// If we aborted, then the start address will be wrong and must be reset.
+	// If we aborted, then the addresses will be wrong and must be reset.
 	EDMA.CH0.ADDR = (unsigned int)&(audio_buf[0]);
 	EDMA.CH2.ADDR = (unsigned int)&(audio_buf[1]);
+	EDMA.CH0.DESTADDR = (unsigned int)&(DACA.CH0DATA);
+	EDMA.CH2.DESTADDR = (unsigned int)&(DACA.CH0DATA);
 
-        // first, make sure the transfer complete flags are clear.
-        EDMA.INTFLAGS |= EDMA_CH0TRNFIF_bm | EDMA_CH2TRNFIF_bm;
+	// first, make sure the transfer complete flags are clear.
+	EDMA.INTFLAGS |= EDMA_CH0TRNFIF_bm | EDMA_CH2TRNFIF_bm;
 
-        unsigned int cnt = read_audio((void *)(audio_buf[0]), sizeof(audio_buf[0]));
-        if (!cnt) return; // empty file - we're done
+	unsigned int cnt = read_audio((void *)(audio_buf[0]), sizeof(audio_buf[0]));
+	if (!cnt) return; // empty file - we're done
 
 	// We're certainly going to play *something* at this point
 	audio_playing = 1;
 	DACA.CTRLA |= DAC_CH0EN_bm;
-        EDMA.CH0.TRFCNT = cnt;
-        EDMA.CH0.CTRLA |= EDMA_CH_ENABLE_bm; // start
-        if (cnt != sizeof(audio_buf[0])) {
-                // last read - just return.
-                return;
-        }
+	EDMA.CH0.TRFCNT = cnt;
+	EDMA.CH0.CTRLA |= EDMA_CH_ENABLE_bm; // start
+	if (cnt != sizeof(audio_buf[0])) {
+		// last read - just return.
+		return;
+	}
 
-        // Set up the next block immediately
+	// Set up the next block immediately
 	cnt = read_audio((void *)(audio_buf[1]), sizeof(audio_buf[1]));
-        if (!cnt) return; // no actual data - so the first block was the end.
-        EDMA.CH2.TRFCNT = cnt;
-        EDMA.CH2.CTRLA |= EDMA_CH_REPEAT_bm; // take over from the first channel
-        if (cnt == sizeof(audio_buf[1])) {
-                // If this isn't the last block, then tell the top layer to
-                // continue filling buffers as they become empty.
-                more_audio = 1;
-        }
+	if (!cnt) return; // no actual data - so the first block was the end.
+	EDMA.CH2.TRFCNT = cnt;
+	EDMA.CH2.CTRLA |= EDMA_CH_REPEAT_bm; // take over from the first channel
+	if (cnt == sizeof(audio_buf[1])) {
+		// If this isn't the last block, then tell the top layer to
+		// continue filling buffers as they become empty.
+		more_audio = 1;
+	}
 }
 
 // Returns a bitmask of buttons - they can be chorded.
 unsigned char get_buttons() {
 	unsigned long now = ticks();
+	if (now == 0) now++; // it must never be zero.
 	unsigned char button_state = (((PORTA.IN & 0xf0) ^ 0xf0) >> 4); // buttons are reverse and in the top nibble
 	if (button_state != last_button_state) {
 		// It changed. It must stay stable for a debounce period before we report.
@@ -286,87 +307,87 @@ void __ATTR_NORETURN__ main(void) {
 	PORTD.DIRSET = ~_BV(3); // All the rest are outputs
 
 	// Switch to the 32 MHz internal osc.
-        OSC.CTRL |= OSC_RC32MEN_bm;
-        while(!(OSC.STATUS & OSC_RC32MRDY_bm)) ; // wait for it.
+	OSC.CTRL |= OSC_RC32MEN_bm;
+	while(!(OSC.STATUS & OSC_RC32MRDY_bm)) ; // wait for it.
 
-        _PROTECTED_WRITE(CLK.CTRL, CLK_SCLKSEL_RC32M_gc); // switch to it
-        OSC.CTRL &= ~(OSC_RC2MEN_bm); // we're done with the 2 MHz osc.
+	_PROTECTED_WRITE(CLK.CTRL, CLK_SCLKSEL_RC32M_gc); // switch to it
+	OSC.CTRL &= ~(OSC_RC2MEN_bm); // we're done with the 2 MHz osc.
 
 	// We want a 1 second watchdog
-        //wdt_enable(WDTO_1S); // This is broken on XMegas.
-        // This replacement code doesn't disable interrupts (but they're not on now anyway)
-        _PROTECTED_WRITE(WDT.CTRL, WDT_PER_1KCLK_gc | WDT_ENABLE_bm | WDT_CEN_bm);
-        while(WDT.STATUS & WDT_SYNCBUSY_bm) ; // wait for it to take
-        // We don't want a windowed watchdog.
-        _PROTECTED_WRITE(WDT.WINCTRL, WDT_WCEN_bm);
-        while(WDT.STATUS & WDT_SYNCBUSY_bm) ; // wait for it to take
+	//wdt_enable(WDTO_1S); // This is broken on XMegas.
+	// This replacement code doesn't disable interrupts (but they're not on now anyway)
+	_PROTECTED_WRITE(WDT.CTRL, WDT_PER_1KCLK_gc | WDT_ENABLE_bm | WDT_CEN_bm);
+	while(WDT.STATUS & WDT_SYNCBUSY_bm) ; // wait for it to take
+	// We don't want a windowed watchdog.
+	_PROTECTED_WRITE(WDT.WINCTRL, WDT_WCEN_bm);
+	while(WDT.STATUS & WDT_SYNCBUSY_bm) ; // wait for it to take
 
 	// Turn off the parts of the chip we don't use.
-        PR.PRGEN = PR_XCL_bm | PR_RTC_bm;
-        PR.PRPA = PR_ADC_bm | PR_AC_bm;
-        PR.PRPC = PR_TWI_bm | PR_HIRES_bm | PR_USART0_bm | PR_TC5_bm;
-        PR.PRPD = PR_USART0_bm | PR_TC5_bm;
+	PR.PRGEN = PR_XCL_bm | PR_RTC_bm;
+	PR.PRPA = PR_ADC_bm | PR_AC_bm;
+	PR.PRPC = PR_TWI_bm | PR_HIRES_bm | PR_USART0_bm | PR_TC5_bm;
+	PR.PRPD = PR_USART0_bm | PR_TC5_bm;
 
-        PORTA.DIRCLR = 0xff; // All of port A is inputs
-        PORTA.PIN2CTRL = PORT_ISC_INPUT_DISABLE_gc; //... except that pin 2 is DAC output
-        PORTA.PIN4CTRL = PORT_OPC_PULLUP_gc; // all of the buttons get pull-ups
-        PORTA.PIN5CTRL = PORT_OPC_PULLUP_gc;
-        PORTA.PIN6CTRL = PORT_OPC_PULLUP_gc;
-        PORTA.PIN7CTRL = PORT_OPC_PULLUP_gc;
+	PORTA.DIRCLR = 0xff; // All of port A is inputs
+	PORTA.PIN2CTRL = PORT_ISC_INPUT_DISABLE_gc; //... except that pin 2 is DAC output
+	PORTA.PIN4CTRL = PORT_OPC_PULLUP_gc; // all of the buttons get pull-ups
+	PORTA.PIN5CTRL = PORT_OPC_PULLUP_gc;
+	PORTA.PIN6CTRL = PORT_OPC_PULLUP_gc;
+	PORTA.PIN7CTRL = PORT_OPC_PULLUP_gc;
 
-        PORTC.OUTSET = _BV(4); // !SD_CS defaults to high
-        PORTC.DIRSET = _BV(4) | _BV(5) | _BV(7); // !SD_CS and most of SPI is output
+	PORTC.OUTSET = _BV(4); // !SD_CS defaults to high
+	PORTC.DIRSET = _BV(4) | _BV(5) | _BV(7); // !SD_CS and most of SPI is output
 
-        // TCC4 is an 8 kHz clock for triggering DMA to the DAC for audio
-        // playback. It's also a tick counter for events and stuff.
-        TCC4.CTRLA = TC45_CLKSEL_DIV8_gc; // 2 MHz timer clocking.
-        TCC4.CTRLB = 0;
-        TCC4.CTRLC = 0;
-        TCC4.CTRLD = 0;
-        TCC4.CTRLE = 0;
-        TCC4.INTCTRLA = TC45_OVFINTLVL_HI_gc; // interrupt on overflow
-        TCC4.INTCTRLB = 0;
-        TCC4.PER = 499; // 8 kHz
+	// TCC4 is an 8 kHz clock for triggering DMA to the DAC for audio
+	// playback. It's also a tick counter for events and stuff.
+	TCC4.CTRLA = TC45_CLKSEL_DIV8_gc; // 2 MHz timer clocking.
+	TCC4.CTRLB = 0;
+	TCC4.CTRLC = 0;
+	TCC4.CTRLD = 0;
+	TCC4.CTRLE = 0;
+	TCC4.INTCTRLA = TC45_OVFINTLVL_HI_gc; // interrupt on overflow
+	TCC4.INTCTRLB = 0;
+	TCC4.PER = 499; // 8 kHz
 
-        // Event 0 is used to trigger DAC conversion during audio output.
-        EVSYS.CH0MUX = EVSYS_CHMUX_TCC4_OVF_gc;
-        EVSYS.CH0CTRL = 0;
+	// Event 0 is used to trigger DAC conversion during audio output.
+	EVSYS.CH0MUX = EVSYS_CHMUX_TCC4_OVF_gc;
+	EVSYS.CH0CTRL = 0;
 
-        DACA.CTRLA = DAC_ENABLE_bm;
-        DACA.CTRLB = DAC_CHSEL_SINGLE_gc | DAC_CH0TRIG_bm; // Trigger a conversion on event 0 - from the 8 kHz timer
-        DACA.CTRLC = DAC_REFSEL_AVCC_gc | DAC_LEFTADJ_bm; // lop off the low 4 bits of each sample
-        DACA.EVCTRL = DAC_EVSEL_0_gc; // trigger event 0
+	DACA.CTRLA = DAC_ENABLE_bm;
+	DACA.CTRLB = DAC_CHSEL_SINGLE_gc | DAC_CH0TRIG_bm; // Trigger a conversion on event 0 - from the 8 kHz timer
+	DACA.CTRLC = DAC_REFSEL_AVCC_gc | DAC_LEFTADJ_bm; // lop off the low 4 bits of each sample
+	DACA.EVCTRL = DAC_EVSEL_0_gc; // trigger event 0
 
-        // Load factory calibration into the DAC
-        NVM.CMD = NVM_CMD_READ_CALIB_ROW_gc;
-        DACA.CH0GAINCAL = pgm_read_byte(offsetof(NVM_PROD_SIGNATURES_t, DACA0GAINCAL));
-        DACA.CH0OFFSETCAL = pgm_read_byte(offsetof(NVM_PROD_SIGNATURES_t, DACA0OFFCAL));
-        DACA.CH1GAINCAL = pgm_read_byte(offsetof(NVM_PROD_SIGNATURES_t, DACA1GAINCAL));
-        DACA.CH1OFFSETCAL = pgm_read_byte(offsetof(NVM_PROD_SIGNATURES_t, DACA1OFFCAL));
-        NVM.CMD = NVM_CMD_NO_OPERATION_gc;
+	// Load factory calibration into the DAC
+	NVM.CMD = NVM_CMD_READ_CALIB_ROW_gc;
+	DACA.CH0GAINCAL = pgm_read_byte(offsetof(NVM_PROD_SIGNATURES_t, DACA0GAINCAL));
+	DACA.CH0OFFSETCAL = pgm_read_byte(offsetof(NVM_PROD_SIGNATURES_t, DACA0OFFCAL));
+	DACA.CH1GAINCAL = pgm_read_byte(offsetof(NVM_PROD_SIGNATURES_t, DACA1GAINCAL));
+	DACA.CH1OFFSETCAL = pgm_read_byte(offsetof(NVM_PROD_SIGNATURES_t, DACA1OFFCAL));
+	NVM.CMD = NVM_CMD_NO_OPERATION_gc;
 
-        EDMA.CTRL = EDMA_RESET_bm;
-        while(EDMA.CTRL & EDMA_RESET_bm); // wait for it
+	EDMA.CTRL = EDMA_RESET_bm;
+	while(EDMA.CTRL & EDMA_RESET_bm); // wait for it
 
-        // DMA is two double-buffered, standard channels.
-        EDMA.CTRL = EDMA_ENABLE_bm | EDMA_CHMODE_STD02_gc | EDMA_DBUFMODE_BUF0123_gc | EDMA_PRIMODE_RR0123_gc;
+	// DMA is two double-buffered, standard channels.
+	EDMA.CTRL = EDMA_ENABLE_bm | EDMA_CHMODE_STD02_gc | EDMA_DBUFMODE_BUF0123_gc | EDMA_PRIMODE_RR0123_gc;
 
-        EDMA.CH0.CTRLA = EDMA_CH_SINGLE_bm | EDMA_CH_BURSTLEN_bm; // single-shot, two byte burst
-        EDMA.CH0.CTRLB = 0; // no interrupts
-        EDMA.CH0.ADDRCTRL = EDMA_CH_RELOAD_TRANSACTION_gc | EDMA_CH_DIR_INC_gc;
-        EDMA.CH0.DESTADDRCTRL = EDMA_CH_RELOAD_BURST_gc | EDMA_CH_DIR_INC_gc;
-        EDMA.CH0.TRIGSRC = EDMA_CH_TRIGSRC_DACA_CH0_gc;
-        EDMA.CH0.DESTADDR = (unsigned int)&(DACA.CH0DATA);
-        EDMA.CH0.ADDR = (unsigned int)&(audio_buf[0]);
+	EDMA.CH0.CTRLA = EDMA_CH_SINGLE_bm | EDMA_CH_BURSTLEN_bm; // single-shot, two byte burst
+	EDMA.CH0.CTRLB = 0; // no interrupts
+	EDMA.CH0.ADDRCTRL = EDMA_CH_RELOAD_TRANSACTION_gc | EDMA_CH_DIR_INC_gc;
+	EDMA.CH0.DESTADDRCTRL = EDMA_CH_RELOAD_BURST_gc | EDMA_CH_DIR_INC_gc;
+	EDMA.CH0.TRIGSRC = EDMA_CH_TRIGSRC_DACA_CH0_gc;
+	EDMA.CH0.DESTADDR = (unsigned int)&(DACA.CH0DATA);
+	EDMA.CH0.ADDR = (unsigned int)&(audio_buf[0]);
 
-        // Channel 2 is configured exactly the same way as channel 0, but with the 2nd memory buffer.
-        EDMA.CH2.CTRLA = EDMA_CH_SINGLE_bm | EDMA_CH_BURSTLEN_bm; // single-shot, two byte burst
-        EDMA.CH2.CTRLB = 0;
-        EDMA.CH2.ADDRCTRL = EDMA_CH_RELOAD_TRANSACTION_gc | EDMA_CH_DIR_INC_gc;
-        EDMA.CH2.DESTADDRCTRL = EDMA_CH_RELOAD_BURST_gc| EDMA_CH_DIR_INC_gc;
-        EDMA.CH2.TRIGSRC = EDMA_CH_TRIGSRC_DACA_CH0_gc;
-        EDMA.CH2.DESTADDR = (unsigned int)&(DACA.CH0DATA);
-        EDMA.CH2.ADDR = (unsigned int)&(audio_buf[1]);
+	// Channel 2 is configured exactly the same way as channel 0, but with the 2nd memory buffer.
+	EDMA.CH2.CTRLA = EDMA_CH_SINGLE_bm | EDMA_CH_BURSTLEN_bm; // single-shot, two byte burst
+	EDMA.CH2.CTRLB = 0;
+	EDMA.CH2.ADDRCTRL = EDMA_CH_RELOAD_TRANSACTION_gc | EDMA_CH_DIR_INC_gc;
+	EDMA.CH2.DESTADDRCTRL = EDMA_CH_RELOAD_BURST_gc| EDMA_CH_DIR_INC_gc;
+	EDMA.CH2.TRIGSRC = EDMA_CH_TRIGSRC_DACA_CH0_gc;
+	EDMA.CH2.DESTADDR = (unsigned int)&(DACA.CH0DATA);
+	EDMA.CH2.ADDR = (unsigned int)&(audio_buf[1]);
 
 	// clear the display buffer
 	BLANK_DISPLAY;
@@ -383,9 +404,35 @@ void __ATTR_NORETURN__ main(void) {
 	PMIC.CTRL = PMIC_LOLVLEN_bm | PMIC_MEDLVLEN_bm | PMIC_HILVLEN_bm;
 	sei();
 
-        if (pf_mount(&fatfs) != FR_OK) {
+	if (pf_mount(&fatfs) != FR_OK) {
 		fail(1);
-        }
+	}
+
+	lose_max = win_max = 0;
+	// figure out how many LOSE_ and WIN_ files there are.
+	// We assume they're numbered 1-n.
+	{
+		DIR dir;
+		FILINFO file;
+		if (pf_opendir(&dir, "/") != FR_OK)
+			fail(3);
+		while(1) {
+			if (pf_readdir(&dir, &file) != FR_OK)
+				fail(4);
+			if (file.fname[0] == 0) break; // we're done
+			if (!strncasecmp_P(file.fname, PSTR("WIN_"), 4)) {
+				unsigned int n = atoi(&(file.fname[4]));
+				if (n > win_max) win_max = n;
+				continue;
+			}
+			if (!strncasecmp_P(file.fname, PSTR("LOSE_"), 5)) {
+				unsigned int n = atoi(&(file.fname[5]));
+				if (n > lose_max) lose_max = n;
+				continue;
+			}
+		}
+		
+	}
 
 	while(1) {
 
@@ -465,8 +512,8 @@ void __ATTR_NORETURN__ main(void) {
 				fname[0] = '1' + MOVE_SOUND(pattern[i]);
 				play_file(fname);
 				// How long we show depends on how far we've gone.
-				// Start at 2 seconds, reduce by a quarter second every 2nd level, minimum 1/4 sec.
-				unsigned long play_time = F_TICK * 2 - ((level /2) * (F_TICK / 4));
+				// Start at 1.5 seconds, reduce by a quarter second every 2nd level, minimum 1/4 sec.
+				unsigned long play_time = ((F_TICK * 3) / 2) - ((level /2) * (F_TICK / 4));
 				if (play_time < (F_TICK / 4)) play_time = F_TICK / 4;
 				for(unsigned long start = ticks(); ticks() - start < play_time; ) audio_poll();
 				disp_buf[MOVE_POS(pattern[i])] = 0;
@@ -541,7 +588,12 @@ game_over:
 			for(int i = 0; i < 4; i++) if (home_row[i] == color) pos = i; // where they were supposed to hit.
 			BLANK_DISPLAY;
 			unsigned long lose_start = ticks();
-			play_file(P("LOSE"));
+			{
+				char fname[8];
+				unsigned int n = (random() % lose_max) + 1;
+				snprintf_P(fname, sizeof(fname), PSTR("LOSE_%d"), n);
+				play_file(fname);
+			}
 			// Show them what they were supposed to push
 			while(audio_poll()) {
 				if (((ticks() - lose_start) / (F_TICK / 4)) % 2)
@@ -554,7 +606,12 @@ game_over:
 			// you win.
 			BLANK_DISPLAY;
 			unsigned long win_start = ticks();
-			play_file(P("WIN"));
+			{
+				char fname[8];
+				unsigned int n = (random() % win_max) + 1;
+				snprintf_P(fname, sizeof(fname), PSTR("WIN_%d"), n);
+				play_file(fname);
+			}
 			while(audio_poll()) {
 				for(int i = 0; i < 4; i++) {
 					if (((ticks() - win_start) / (F_TICK / 2)) % 2)
