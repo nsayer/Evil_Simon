@@ -32,6 +32,7 @@
 #include <string.h>
 #include "pff.h"
 #include "Evil_Simon.h"
+#include "random.h"
 
 // EEPROM layout
 // 0-3: random seed
@@ -93,6 +94,9 @@ unsigned long debounce_start;
 // How many possible "win" and "lose" audio tracks are there?
 unsigned long lose_max, win_max;
 
+// random number seed
+unsigned long rand_ctx;
+
 // PFF's structure
 FATFS fatfs;
 
@@ -135,7 +139,7 @@ unsigned long ticks() {
 }
 
 static void __ATTR_NORETURN__ power_off(void) {
-	eeprom_update_dword(EE_RAND_SEED, random());
+	eeprom_update_dword(EE_RAND_SEED, l_random(&rand_ctx));
 	PORTC.DIRCLR = _BV(0); // make the power pin Hi-Z. The pull-up will turn power off.
 	while(1) wdt_reset(); // wait patiently for death
 	__builtin_unreachable();
@@ -398,7 +402,8 @@ void __ATTR_NORETURN__ main(void) {
 	debounce_start = 0;
 
 	// Seed the PRNG from our last power-off state.
-	srandom(eeprom_read_dword(EE_RAND_SEED));
+	rand_ctx = eeprom_read_dword(EE_RAND_SEED);
+	l_random(&rand_ctx); // perturb it once
 
 	// Release the hounds!
 	PMIC.CTRL = PMIC_LOLVLEN_bm | PMIC_MEDLVLEN_bm | PMIC_HILVLEN_bm;
@@ -463,7 +468,7 @@ void __ATTR_NORETURN__ main(void) {
 		// Level 1 shifts the positions around
 		// Level 2 shifts the sounds around
 		// Level 3 shifts the home colors around every turn.
-		// Level 4 shofts the home colors around even within a turn.
+		// Level 4 shifts the home colors around even within a turn.
 
 		switch(game_select) {
 			case 1 << (GREEN - 1):
@@ -496,7 +501,7 @@ void __ATTR_NORETURN__ main(void) {
 				level = 0;
 				goto game_over;
 			}
-			pattern[level] = random() % 0x40; // from 0b000000 to 0b111111
+			pattern[level] = l_random(&rand_ctx) % 0x40; // from 0b000000 to 0b111111
 			if (game_select < 2) { // At levels less than 2, the sounds become consistent.
 				// Copy the color to the sound
 				pattern[level] = (pattern[level] & 0b110011) | (MOVE_COLOR(pattern[level]) << 2);
@@ -530,7 +535,7 @@ void __ATTR_NORETURN__ main(void) {
 				if (game_select >= 4 || (game_select >= 3 && step == 0)) {
 					// do a 4 position knuth shuffle
 					for(int i = 0; i < 3; i++) {
-						int j = (random() % (4 - i)) + i; // random number i through 3 inclusive
+						int j = (l_random(&rand_ctx) % (4 - i)) + i; // random number i through 3 inclusive
 						unsigned char swap = home_row[i];
 						home_row[i] = home_row[j];
 						home_row[j] = swap;
@@ -590,7 +595,7 @@ game_over:
 			unsigned long lose_start = ticks();
 			{
 				char fname[8];
-				unsigned int n = (random() % lose_max) + 1;
+				unsigned int n = (l_random(&rand_ctx) % lose_max) + 1;
 				snprintf_P(fname, sizeof(fname), PSTR("LOSE_%d"), n);
 				play_file(fname);
 			}
@@ -608,7 +613,7 @@ game_over:
 			unsigned long win_start = ticks();
 			{
 				char fname[8];
-				unsigned int n = (random() % win_max) + 1;
+				unsigned int n = (l_random(&rand_ctx) % win_max) + 1;
 				snprintf_P(fname, sizeof(fname), PSTR("WIN_%d"), n);
 				play_file(fname);
 			}
