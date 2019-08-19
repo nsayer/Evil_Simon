@@ -139,6 +139,9 @@ unsigned long ticks() {
 }
 
 static void __ATTR_NORETURN__ power_off(void) {
+	cli(); // no more rastering
+	PORTD.OUTSET = 0xf0; // LEDs off
+	PORTD.OUTCLR = 0x7; // colors off too
 	eeprom_update_dword(EE_RAND_SEED, l_random(&rand_ctx));
 	PORTC.DIRCLR = _BV(0); // make the power pin Hi-Z. The pull-up will turn power off.
 	while(1) wdt_reset(); // wait patiently for death
@@ -147,7 +150,7 @@ static void __ATTR_NORETURN__ power_off(void) {
 
 static void __ATTR_NORETURN__ fail(unsigned char type) {
 	cli(); // No more rastering.
-	// announce the failure - white 4 bit binary value
+	// announce the failure - white 4 bit binary value in white LEDs.
 	PORTD.OUTSET = 7;
 	PORTD.OUTCLR = 8;
 	PORTD.OUTSET = 0xf0;
