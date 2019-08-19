@@ -25,7 +25,7 @@ all:	$(OUT).hex $(OUT).hex
 %.hex: %.elf
 	$(OBJCPY) -j .text -j .data -O ihex $^ $@
 
-Evil_Simon.elf: Evil_Simon.o pff.o diskio_$(FLASH_TYPE).o
+Evil_Simon.elf: Evil_Simon.o random.o pff.o diskio_$(FLASH_TYPE).o
 
 %.elf: %.o
 	$(CC) $(CFLAGS) -o $@ $^
