@@ -6,8 +6,8 @@ OUT=Evil_Simon
 
 CHIP = atxmega32e5
 
-#FLASH_TYPE=spi
-FLASH_TYPE=sd
+FLASH_TYPE=spi
+#FLASH_TYPE=sd
 
 CC = avr-gcc
 OBJCPY = avr-objcopy
