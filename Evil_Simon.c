@@ -55,8 +55,8 @@
 #define MOVE_COLOR(x) ((x >> 0) & 3)
 
 // F_TICK is defined in the .h file.
-// Debounce time is 50 ms
-#define DEBOUNCE_TICKS (F_TICK / 20)
+// Debounce time is 100 ms
+#define DEBOUNCE_TICKS (F_TICK / 10)
 // While in attract mode, wait 30 seconds for a game and then go to sleep
 #define SLEEP_TIMEOUT (30 * F_TICK)
 // While it's the player's turn, wait 10 seconds before giving up on him
@@ -301,6 +301,25 @@ unsigned char get_buttons() {
 	return 0;
 }
 
+// Turn two color values into a sound filename. Either a single digit for single
+// colors or a chord filename, where the lower number is always first.
+static void sound_filename(char *buf, unsigned char color1, unsigned char color2) {
+	if (color2 != 0xff) {
+		// For chords, the filename is always low-number-first
+		if (color1 < color2) {
+			buf[0] = '1' + color1;
+			buf[1] = '1' + color2;
+		} else {
+			buf[0] = '1' + color2;
+			buf[1] = '1' + color1;
+		}
+		buf[2] = 0;
+	} else {
+		buf[0] = '1' + color1;
+		buf[1] = 0;
+	}
+}
+
 void __ATTR_NORETURN__ main(void) {
 
 	// The very first thing - set the power-hold pin low.
@@ -492,39 +511,59 @@ void __ATTR_NORETURN__ main(void) {
 		}
 		// Start the game
 		unsigned char level = 0, step;
-		unsigned char pattern[256];
+		unsigned char pattern[256][2];
 		unsigned char home_row[4];
 
 		// game loop
 		while(1) {
-			char fname[2];
-			fname[1] = 0;
+			char fname[3];
 			if (level >= 250) {
 				// I give up
 				level = 0;
 				goto game_over;
 			}
-			pattern[level] = l_random(&rand_ctx) % 0x40; // from 0b000000 to 0b111111
+			pattern[level][0] = l_random(&rand_ctx) % 0x40; // from 0b000000 to 0b111111
 			if (game_select < 2) { // At levels less than 2, the sounds become consistent.
 				// Copy the color to the sound
-				pattern[level] = (pattern[level] & 0b110011) | (MOVE_COLOR(pattern[level]) << 2);
+				pattern[level][0] = (pattern[level][0] & 0b110011) | (MOVE_COLOR(pattern[level][0]) << 2);
 			}
 			if (game_select < 1) { // At levels less than 1, the positions become consistent.
 				// Copy the color to the position
-				pattern[level] = (pattern[level] & 0b001111) | (MOVE_COLOR(pattern[level]) << 4);
+				pattern[level][0] = (pattern[level][0] & 0b001111) | (MOVE_COLOR(pattern[level][0]) << 4);
+			}
+			if (level < 5 || (l_random(&rand_ctx) % 10) > (3 + (level - 5) / 5)) // increasing probability as we go
+				pattern[level][1] = 0xff; // the top two bits being 1 make this distinct from a move triad.
+			else {
+				do {
+					// make a chord move
+					pattern[level][1] = l_random(&rand_ctx) % 0x40; // from 0b000000 to 0b111111
+					if (game_select < 2) { // At levels less than 2, the sounds become consistent.
+						// Copy the color to the sound
+						pattern[level][1] = (pattern[level][1] & 0b110011) | (MOVE_COLOR(pattern[level][1]) << 2);
+					}
+					if (game_select < 1) { // At levels less than 1, the positions become consistent.
+						// Copy the color to the position
+						pattern[level][1] = (pattern[level][1] & 0b001111) | (MOVE_COLOR(pattern[level][1]) << 4);
+					}
+					// But it has to be completely distinct from the "primary" move.
+				} while(MOVE_POS(pattern[level][0]) == MOVE_POS(pattern[level][1]) ||
+					MOVE_COLOR(pattern[level][0]) == MOVE_COLOR(pattern[level][1]) ||
+					MOVE_SOUND(pattern[level][0]) == MOVE_SOUND(pattern[level][1]));
 			}
 			level++;
 			// My turn
 			for(int i = 0; i < level; i++) {
-				disp_buf[MOVE_POS(pattern[i])] = MOVE_COLOR(pattern[i]) + 1;
-				fname[0] = '1' + MOVE_SOUND(pattern[i]);
+				disp_buf[MOVE_POS(pattern[i][0])] = MOVE_COLOR(pattern[i][0]) + 1;
+				if (pattern[i][1] != 0xff)
+					disp_buf[MOVE_POS(pattern[i][1])] = MOVE_COLOR(pattern[i][1]) + 1;
+				sound_filename(fname, MOVE_SOUND(pattern[i][0]), pattern[i][1] == 0xff?0xff:MOVE_SOUND(pattern[i][1]));
 				play_file(fname);
 				// How long we show depends on how far we've gone.
 				// Start at 1.5 seconds, reduce by a quarter second every 2nd level, minimum 1/4 sec.
 				unsigned long play_time = ((F_TICK * 3) / 2) - ((level /2) * (F_TICK / 4));
 				if (play_time < (F_TICK / 4)) play_time = F_TICK / 4;
 				for(unsigned long start = ticks(); ticks() - start < play_time; ) audio_poll();
-				disp_buf[MOVE_POS(pattern[i])] = 0;
+				BLANK_DISPLAY;
 				// pause 100 msec
 				for(unsigned long delay_start = ticks(); ticks() - delay_start > (F_TICK / 10); ) wdt_reset();
 			}
@@ -554,46 +593,56 @@ void __ATTR_NORETURN__ main(void) {
 					}
 					wdt_reset();
 				}
-				unsigned char move;
-				switch(buttons) {
-					case 0b1:
-						move = 0;
-						break;
-					case 0b10:
-						move = 1;
-						break;
-					case 0b100:
-						move = 2;
-						break;
-					case 0b1000:
-						move = 3;
-						break;
-					default:
-						goto game_over; // either a chord or time out.
+				unsigned char move1 = 0xff, move2 = 0xff, button1 = 0xff, button2 = 0xff;;
+				for(int i = 0; i < 4; i++) {
+					if (buttons & (1 << i)) {
+						if (button1 == 0xff)
+							button1 = i;
+						else
+							button2 = i;
+					}
 				}
-				move = home_row[move]; // translate it into its displayed color
-				if (MOVE_COLOR(pattern[step]) != move) goto game_over; // WRONG!!!
+				move1 = home_row[button1]; // translate it into its displayed color
+				if (button2 != 0xff) move2 = home_row[button2];
+				if (pattern[step][1] == 0xff) {
+					// Single expected
+					if (move2 != 0xff) goto game_over; // WRONG! No chords allowed!
+					if (MOVE_COLOR(pattern[step][0]) != move1) goto game_over; // WRONG!
+				} else {
+					// chord expected
+					// For testing chords, the order doesn't matter, so test both ways
+					if (MOVE_COLOR(pattern[step][0]) != move1 && MOVE_COLOR(pattern[step][0]) != move2) goto game_over; // WRONG!
+					if (MOVE_COLOR(pattern[step][1]) != move1 && MOVE_COLOR(pattern[step][1]) != move2) goto game_over; // WRONG!
+#if 0
+					if (!((MOVE_COLOR(pattern[step][0]) == move1 && MOVE_COLOR(pattern[step][1] == move2)) ||
+						(MOVE_COLOR(pattern[step][0]) == move2 && MOVE_COLOR(pattern[step][1] == move1)))) goto game_over; // WRONG!
+#endif
+				}
 				BLANK_DISPLAY;
 				// Light up what they pushed
-				disp_buf[MOVE_COLOR(pattern[step])] = MOVE_COLOR(pattern[step]) + 1;
-				fname[0] = '1' + MOVE_COLOR(pattern[step]);
+				disp_buf[button1] = home_row[button1] + 1;
+				if (pattern[step][1] != 0xff) {
+					disp_buf[button2] = home_row[button2] + 1;
+				}
+				// play the noises we made.
+				sound_filename(fname, MOVE_SOUND(pattern[step][0]), pattern[step][1] == 0xff?0xff:MOVE_SOUND(pattern[step][1]));
 				play_file(fname);
 			}
-			for(unsigned long start = ticks(); ticks() - start < F_TICK / 4; ) audio_poll(); // show their button for 1/4 sec
-			for(int i = 0; i < 4; i++) disp_buf[i] = home_row[i] + 1; // show the last home colors
 			while(audio_poll()) ; // Finish up the last chime
 			BLANK_DISPLAY;
-			// wait a second
-			for(unsigned long wait = ticks(); ticks() - wait < F_TICK; ) wdt_reset();
+			// wait a half second
+			for(unsigned long wait = ticks(); ticks() - wait < F_TICK / 2; ) wdt_reset();
 		}
 
 game_over:
 		// game over
 		if (level != 0) {
 			// YOU LOSE!! HAHAHAHAHAHAHAHA!!
-			unsigned char color = MOVE_COLOR(pattern[step]); // The color they should have hit
-			unsigned char pos = 0;
-			for(int i = 0; i < 4; i++) if (home_row[i] == color) pos = i; // where they were supposed to hit.
+			unsigned char color1 = MOVE_COLOR(pattern[step][0]) + 1; // The first color they should have hit
+			unsigned char color2 = 0;
+			if (pattern[step][1] != 0xff) color2 = MOVE_COLOR(pattern[step][1]) + 1; // the second color
+			unsigned char pos1 = MOVE_POS(pattern[step][0]);
+			unsigned char pos2 = MOVE_POS(pattern[step][1]); // it's ok - this is undefined if color2 = 0.
 			BLANK_DISPLAY;
 			unsigned long lose_start = ticks();
 			{
@@ -604,10 +653,13 @@ game_over:
 			}
 			// Show them what they were supposed to push
 			while(audio_poll()) {
-				if (((ticks() - lose_start) / (F_TICK / 4)) % 2)
-					disp_buf[pos] = color + 1;
-				else
-					disp_buf[pos] = 0;
+				if (((ticks() - lose_start) / (F_TICK / 4)) % 2) {
+					disp_buf[pos1] = color1;
+					if (color2 != 0) disp_buf[pos2] = color2;
+				} else {
+					disp_buf[pos1] = BLACK;
+					if (color2 != 0) disp_buf[pos2] = BLACK;
+				}
 			}
 			BLANK_DISPLAY;
 		} else {
