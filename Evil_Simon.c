@@ -82,7 +82,7 @@ char p_buffer[96];
 
 volatile unsigned char disp_buf[4];
 
-// The double audio buffers. The lenght of each MUST be even!
+// The double audio buffers. The length of each MUST be even!
 volatile unsigned char audio_buf[2][512];
 
 volatile unsigned long ticks_cnt;
