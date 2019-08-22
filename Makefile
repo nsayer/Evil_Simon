@@ -36,3 +36,6 @@ clean:
 flash:	$(OUT).hex
 	$(AVRDUDE) $(DUDEOPTS) -c $(PROGRAMMER) -p $(CHIP) -U flash:w:$(OUT).hex
 
+# BODACT = 10, EESAVE=1, BODLVL=101 (2v)
+fuse:
+	$(AVRDUDE) $(DUDEOPTS) -c $(PROGRAMMER) -p $(CHIP) -U fuse5:w:0xed:m
