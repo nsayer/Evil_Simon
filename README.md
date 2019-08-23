@@ -34,6 +34,9 @@ of these is randomly selected to be played.
 The sound files are all raw, single channel, 8 bit mu-law encoded 8 kHz audio files. You can make them with 'sox', and the output
 file parameters are "-t raw -r 8000 -c 1 -b 8 -e mu-law".
 
+To prepare the disk image, first make a file the size of the chip filled with 0xff bytes: "dd if=/dev/zero bs=8m count=1 | tr '\0' '\377' > image".
+Next, make a FAT filesystem on the image: "mkfs.vfat image". Next, mount the image: "mount -o loop image /mnt". Copy the files into the image and unmount it. "image" is now the file you need to burn into the flash ROM.
+
 ## Usage
 
 To play the game, remember the pattern of the colored lights Симон shows, and then repeat the pattern by pressing the
