@@ -613,10 +613,6 @@ void __ATTR_NORETURN__ main(void) {
 					// For testing chords, the order doesn't matter, so test both ways
 					if (MOVE_COLOR(pattern[step][0]) != move1 && MOVE_COLOR(pattern[step][0]) != move2) goto game_over; // WRONG!
 					if (MOVE_COLOR(pattern[step][1]) != move1 && MOVE_COLOR(pattern[step][1]) != move2) goto game_over; // WRONG!
-#if 0
-					if (!((MOVE_COLOR(pattern[step][0]) == move1 && MOVE_COLOR(pattern[step][1] == move2)) ||
-						(MOVE_COLOR(pattern[step][0]) == move2 && MOVE_COLOR(pattern[step][1] == move1)))) goto game_over; // WRONG!
-#endif
 				}
 				BLANK_DISPLAY;
 				// Light up what they pushed
@@ -641,8 +637,11 @@ game_over:
 			unsigned char color1 = MOVE_COLOR(pattern[step][0]) + 1; // The first color they should have hit
 			unsigned char color2 = 0;
 			if (pattern[step][1] != 0xff) color2 = MOVE_COLOR(pattern[step][1]) + 1; // the second color
-			unsigned char pos1 = MOVE_POS(pattern[step][0]);
-			unsigned char pos2 = MOVE_POS(pattern[step][1]); // it's ok - this is undefined if color2 = 0.
+			unsigned char pos1 = 0, pos2 = 0;
+			for(int i = 0; i < 4; i++) {
+				if (home_row[i] == color1 - 1) pos1 = i;
+				if (home_row[i] == color2 - 1) pos2 = i; // this won't matter if color2 == 0.
+			}
 			BLANK_DISPLAY;
 			unsigned long lose_start = ticks();
 			{
