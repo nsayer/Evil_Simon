@@ -523,11 +523,11 @@ void __ATTR_NORETURN__ main(void) {
 				goto game_over;
 			}
 			pattern[level][0] = l_random(&rand_ctx) % 0x40; // from 0b000000 to 0b111111
-			if (game_select < 2) { // At levels less than 2, the sounds become consistent.
+			if (game_select < 1) { // At levels less than 1, the sounds become consistent.
 				// Copy the color to the sound
 				pattern[level][0] = (pattern[level][0] & 0b110011) | (MOVE_COLOR(pattern[level][0]) << 2);
 			}
-			if (game_select < 1) { // At levels less than 1, the positions become consistent.
+			if (game_select < 2) { // At levels less than 2, the positions become consistent.
 				// Copy the color to the position
 				pattern[level][0] = (pattern[level][0] & 0b001111) | (MOVE_COLOR(pattern[level][0]) << 4);
 			}
