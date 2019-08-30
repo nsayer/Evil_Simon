@@ -441,7 +441,7 @@ void __ATTR_NORETURN__ main(void) {
 	{
 		DIR dir;
 		FILINFO file;
-		if (pf_opendir(&dir, "/") != FR_OK)
+		if (pf_opendir(&dir, PSTR("/")) != FR_OK)
 			fail(3);
 		while(1) {
 			if (pf_readdir(&dir, &file) != FR_OK)
