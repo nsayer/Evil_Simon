@@ -15,7 +15,8 @@ Upload a suitable disk image with audio samples to the SPI flash chip first. If 
 must hold it in RESET (or erase it) to keep the SPI bus quiescent for programming.
 
 Build the code with the included Makefile, which assumes you have an avr-gcc with XMega support in your path. Upload
-it to the controller on the board with avrdude and a PDI capable programmer.
+it to the controller on the board with avrdude and a PDI capable programmer. Be sure to also set the fuses to set up the
+brownout detector.
 
 Note that there are two options for the audio storage: either SPI flash or an SD card. You should pick the appropriate option
 in the Makefile depending on your hardware.
@@ -30,6 +31,7 @@ they get to a certain number of steps in the pattern (right now, that's 250, so 
 at random to play.
 * LOSE_n where n starts at 1 and counts arbitrarily high: the sound files played when the player loses. Like the WIN_ files, one
 of these is randomly selected to be played.
+* START_n where n starts at 1 and counts arbitrarily high: the sound files played immediately after a user selects a level of difficulty to start the game.
 
 The sound files are all raw, single channel, 8 bit mu-law encoded 8 kHz audio files. You can make them with 'sox', and the output
 file parameters are "-t raw -r 8000 -c 1 -b 8 -e mu-law".
@@ -50,9 +52,9 @@ To begin the game, first press a button to wake Симон up (if the lights are
 buttons to select a level of difficulty:
 
 * Green is easy - it's normal Simon. No tricky stuff. The colors never move and the sounds are consistent.
-* Blue is harder - the sounds are no longer tied to the colors during the pattern statement.
-* Yellow is hardest - the positions of the colors are no longer constant during the pattern statement.
-* Red is nightmare - In addition to the sounds and positions being scrambled during the pattern statement, the button colors
+* Blue is harder - the sounds are no longer tied to the colors.
+* Yellow is hardest - the positions of the colors are no longer consistent.
+* Red is nightmare - In addition to the sounds and positions being scrambled, the button colors
 will be randomized at the start of the player's turn.
 * The "impossible" level is activated by pressing any two buttons to start. Here the button colors are
 randomized at every step during the player's turn.

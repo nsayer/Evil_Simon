@@ -55,23 +55,16 @@
 #define MOVE_COLOR(x) ((x >> 0) & 3)
 
 // F_TICK is defined in the .h file.
-// Debounce time is 100 ms
-#define DEBOUNCE_TICKS (F_TICK / 10)
+// Debounce time is 50 ms
+#define DEBOUNCE_TICKS (F_TICK / 20)
 // While in attract mode, wait 30 seconds for a game and then go to sleep
-#define SLEEP_TIMEOUT (30 * F_TICK)
+#define SLEEP_TIMEOUT (F_TICK * 30)
 // While it's the player's turn, wait 10 seconds before giving up on him
-#define TURN_TIMEOUT (10 * F_TICK)
-
-#define BLANK_DISPLAY (memset(&disp_buf, 0, sizeof(disp_buf)))
+#define TURN_TIMEOUT (F_TICK * 10)
 
 // This is the division factor for converting the 8 kHz tick interrupt into the LED raster rate.
-// The tension here is that the lower the raster rate, the less potential audio interference
-// there may be.
-#define RASTER_RATE (10)
-
-// This is the number of RASTER_RATE time periods each LED gets. One of them has the lights on,
-// the rest are dead. So increasing this number dims the LEDs.
-#define DIM_FACTOR (3)
+// There are 32 cycles in the raster system, so the maximum rate is 250 Hz.
+#define RASTER_RATE (1)
 
 // Thanks to Gareth Evans at http://todbot.com/blog/2008/06/19/how-to-do-big-strings-in-arduino/
 // Note that you must be careful not to use this macro more than once per "statement", lest you
@@ -80,6 +73,9 @@
 char p_buffer[96];
 #define P(str) (strcpy_P(p_buffer, PSTR(str)), p_buffer)
 
+// The LED "frame buffer" - the raster system reads from here.
+// The bottom nibble is the color, and the top nibble is a brightness value
+// that goes from 7 (dimmest) to 0 (brightest).
 volatile unsigned char disp_buf[4];
 
 // The double audio buffers. The length of each MUST be even!
@@ -92,13 +88,18 @@ unsigned char last_button_state;
 unsigned long debounce_start;
 
 // How many possible "win" and "lose" audio tracks are there?
-unsigned long lose_max, win_max;
+unsigned long start_max, lose_max, win_max;
 
 // random number seed
 unsigned long rand_ctx;
 
 // PFF's structure
 FATFS fatfs;
+
+// blank the display
+static inline __attribute__ ((always_inline)) void blank_display() {
+	memset(&disp_buf, 0, sizeof(disp_buf));
+}
 
 // ticks counter and display raster ISR
 ISR(TCC4_OVF_vect) {
@@ -107,30 +108,37 @@ ISR(TCC4_OVF_vect) {
 
 	static unsigned char disp_num;
 
-	if (ticks_cnt % RASTER_RATE) return; // Make the basic refresh rate 100 Hz - 800 Hz over 8 slots.
+	if (ticks_cnt % RASTER_RATE) return;
 
-	PORTD.OUTSET = 0xf0; // turn all the digits off.
-	PORTD.OUTCLR = 0x07; // turn all the color pins off.
-	if ((ticks_cnt / RASTER_RATE) % DIM_FACTOR) return; // Every LED gets one lit slot and N dark slots.
-	if (++disp_num >= 4) disp_num = 0;
-	switch(disp_buf[disp_num]) {
-		case RED:
-			PORTD.OUTSET = 0b0001; // red pin on
-			break;
-		case GREEN:
-			PORTD.OUTSET = 0b0010; // green pin on
-			break;
-		case BLUE:
-			PORTD.OUTSET = 0b0100; // blue pin on
-			break;
-		case YELLOW:
-			PORTD.OUTSET = 0b0011; // red + green pin on
-			break;
+	if (((ticks_cnt / RASTER_RATE) % 8) == 0) {
+		PORTD.OUTSET = 0xf0; // turn all the digits off.
+		PORTD.OUTCLR = 0x07; // turn all the color pins off.
+		if (++disp_num >= 4) disp_num = 0; // next LED
 	}
-	PORTD.OUTCLR = 0x10 << disp_num; // turn on the selected display
+
+	unsigned char brightness = (disp_buf[disp_num] >> 4) & 0xf;
+
+	if (((ticks_cnt / RASTER_RATE) % 8) == brightness) {
+		unsigned char color = disp_buf[disp_num] & 0xf;
+		switch(color) {
+			case RED:
+				PORTD.OUTSET = 0b0001; // red pin on
+				break;
+			case GREEN:
+				PORTD.OUTSET = 0b0010; // green pin on
+				break;
+			case BLUE:
+				PORTD.OUTSET = 0b0100; // blue pin on
+				break;
+			case YELLOW:
+				PORTD.OUTSET = 0b0011; // red + green pin on
+				break;
+		}
+		PORTD.OUTCLR = 0x10 << disp_num; // turn on the selected display
+	}
 }
 
-unsigned long ticks() {
+unsigned long inline __attribute__ ((always_inline)) ticks() {
 	unsigned long out;
 	ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
 		out = ticks_cnt;
@@ -321,7 +329,6 @@ static void sound_filename(char *buf, unsigned char color1, unsigned char color2
 }
 
 void __ATTR_NORETURN__ main(void) {
-
 	// The very first thing - set the power-hold pin low.
 	PORTC.OUTCLR = _BV(0);
 	PORTC.DIRSET = _BV(0);
@@ -416,7 +423,7 @@ void __ATTR_NORETURN__ main(void) {
 	EDMA.CH2.ADDR = (unsigned int)&(audio_buf[1]);
 
 	// clear the display buffer
-	BLANK_DISPLAY;
+	blank_display();
 
 	// Since we just got turned on, a button is probably being held right now.
 	// Don't count that press.
@@ -435,7 +442,7 @@ void __ATTR_NORETURN__ main(void) {
 		fail(1);
 	}
 
-	lose_max = win_max = 0;
+	start_max = lose_max = win_max = 0;
 	// figure out how many LOSE_ and WIN_ files there are.
 	// We assume they're numbered 1-n.
 	{
@@ -457,58 +464,91 @@ void __ATTR_NORETURN__ main(void) {
 				if (n > lose_max) lose_max = n;
 				continue;
 			}
+			if (!strncasecmp_P(file.fname, PSTR("START_"), 6)) {
+				unsigned int n = atoi(&(file.fname[6]));
+				if (n > start_max) start_max = n;
+				continue;
+			}
 		}
 		
 	}
 
 	while(1) {
 
-		// Attract mode
+		// Attract mode - cycle the brightness up and down displaying the home colors
 		unsigned char game_select;
-		unsigned long wait_start = ticks();
-		while(1) {
-			wdt_reset();
-			unsigned long now = ticks();
-			if (now - wait_start > SLEEP_TIMEOUT) {
-				// clear the display
-				BLANK_DISPLAY;
-				// Zzzzzzz
-				power_off();
-				__builtin_unreachable();
+		{
+			unsigned long wait_start = ticks();
+			unsigned char breath_cycle = 0;
+			while(1) {
+				wdt_reset();
+				unsigned long now = ticks();
+				if (now - wait_start > SLEEP_TIMEOUT) {
+					// clear the display
+					blank_display();
+					// Zzzzzzz
+					power_off();
+					__builtin_unreachable();
+				}
+				if (!((now - wait_start) % (F_TICK / 10))) {
+					if (++breath_cycle >= 0x10) breath_cycle = 0;
+					// We want the brightness to go from 0 to 7 and back to 0
+					unsigned char brightness = (breath_cycle > 7)?16 - breath_cycle:breath_cycle;
+					for(int i = 0; i < 4; i++) {
+						disp_buf[i] = (i + 1) | (brightness << 4);
+					}
+					while(ticks() == now) ; // wait for change.
+				}
+				if ((game_select = get_buttons())) break;
 			}
-			unsigned char light = ((now - wait_start) / (F_TICK / 4)) % 4;
-			for(int i = 0; i < 4; i++) {
-				disp_buf[i] = (i == light)? (i + 1) : BLACK;
-			}
-			if ((game_select = get_buttons())) break;
 		}
 
-		BLANK_DISPLAY;
+		blank_display();
 
 		// Translate the button push into a difficulty level.
 		// Level 0 is ordinary Simon.
-		// Level 1 shifts the positions around
-		// Level 2 shifts the sounds around
+		// Level 1 shifts the sounds around
+		// Level 2 shifts the positions around
 		// Level 3 shifts the home colors around every turn.
 		// Level 4 shifts the home colors around even within a turn.
 
 		switch(game_select) {
 			case 1 << (GREEN - 1):
 				game_select = 0;
+				disp_buf[1] = GREEN;
 				break;
 			case 1 << (BLUE - 1):
 				game_select = 1;
+				disp_buf[2] = BLUE;
 				break;
 			case 1 << (YELLOW - 1):
 				game_select = 2;
+				disp_buf[3] = YELLOW;
 				break;
 			case 1 << (RED - 1):
 				game_select = 3;
+				disp_buf[0] = RED;
 				break;
 			default: // This must have been a chord.
 				game_select = 4;
+				for(int i = 0; i < 4; i++)
+					disp_buf[i] = i + 1; // light up everything
 				break;
 		}
+		{
+			char fname[9];
+			unsigned int n = (l_random(&rand_ctx) % start_max) + 1;
+			snprintf_P(fname, sizeof(fname), PSTR("START_%d"), n);
+			play_file(fname);
+		}
+		while(audio_poll()) ; // finish the noise
+
+		// blank and wait a tick
+		blank_display();
+		for(unsigned long start = ticks(); ticks() - start < F_TICK / 2; ) ;
+		// We just sat here for a bit... pet the dog.
+		wdt_reset();
+		
 		// Start the game
 		unsigned char level = 0, step;
 		unsigned char pattern[256][2];
@@ -537,11 +577,11 @@ void __ATTR_NORETURN__ main(void) {
 				do {
 					// make a chord move
 					pattern[level][1] = l_random(&rand_ctx) % 0x40; // from 0b000000 to 0b111111
-					if (game_select < 2) { // At levels less than 2, the sounds become consistent.
+					if (game_select < 1) { // At levels less than 1, the sounds become consistent.
 						// Copy the color to the sound
 						pattern[level][1] = (pattern[level][1] & 0b110011) | (MOVE_COLOR(pattern[level][1]) << 2);
 					}
-					if (game_select < 1) { // At levels less than 1, the positions become consistent.
+					if (game_select < 2) { // At levels less than 2, the positions become consistent.
 						// Copy the color to the position
 						pattern[level][1] = (pattern[level][1] & 0b001111) | (MOVE_COLOR(pattern[level][1]) << 4);
 					}
@@ -563,7 +603,7 @@ void __ATTR_NORETURN__ main(void) {
 				unsigned long play_time = ((F_TICK * 3) / 2) - ((level /2) * (F_TICK / 4));
 				if (play_time < (F_TICK / 4)) play_time = F_TICK / 4;
 				for(unsigned long start = ticks(); ticks() - start < play_time; ) audio_poll();
-				BLANK_DISPLAY;
+				blank_display();
 				// pause 100 msec
 				for(unsigned long delay_start = ticks(); ticks() - delay_start > (F_TICK / 10); ) wdt_reset();
 			}
@@ -614,7 +654,7 @@ void __ATTR_NORETURN__ main(void) {
 					if (MOVE_COLOR(pattern[step][0]) != move1 && MOVE_COLOR(pattern[step][0]) != move2) goto game_over; // WRONG!
 					if (MOVE_COLOR(pattern[step][1]) != move1 && MOVE_COLOR(pattern[step][1]) != move2) goto game_over; // WRONG!
 				}
-				BLANK_DISPLAY;
+				blank_display();
 				// Light up what they pushed
 				disp_buf[button1] = home_row[button1] + 1;
 				if (pattern[step][1] != 0xff) {
@@ -625,7 +665,7 @@ void __ATTR_NORETURN__ main(void) {
 				play_file(fname);
 			}
 			while(audio_poll()) ; // Finish up the last chime
-			BLANK_DISPLAY;
+			blank_display();
 			// wait a half second
 			for(unsigned long wait = ticks(); ticks() - wait < F_TICK / 2; ) wdt_reset();
 		}
@@ -642,10 +682,10 @@ game_over:
 				if (home_row[i] == color1 - 1) pos1 = i;
 				if (home_row[i] == color2 - 1) pos2 = i; // this won't matter if color2 == 0.
 			}
-			BLANK_DISPLAY;
+			blank_display();
 			unsigned long lose_start = ticks();
 			{
-				char fname[8];
+				char fname[9];
 				unsigned int n = (l_random(&rand_ctx) % lose_max) + 1;
 				snprintf_P(fname, sizeof(fname), PSTR("LOSE_%d"), n);
 				play_file(fname);
@@ -660,13 +700,13 @@ game_over:
 					if (color2 != 0) disp_buf[pos2] = BLACK;
 				}
 			}
-			BLANK_DISPLAY;
+			blank_display();
 		} else {
 			// you win.
-			BLANK_DISPLAY;
+			blank_display();
 			unsigned long win_start = ticks();
 			{
-				char fname[8];
+				char fname[9];
 				unsigned int n = (l_random(&rand_ctx) % win_max) + 1;
 				snprintf_P(fname, sizeof(fname), PSTR("WIN_%d"), n);
 				play_file(fname);
@@ -679,7 +719,7 @@ game_over:
 						disp_buf[i] = 0;
 				}
 			}
-			BLANK_DISPLAY;
+			blank_display();
 		}
 
 	}
