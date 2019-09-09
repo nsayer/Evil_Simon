@@ -330,7 +330,7 @@ static void sound_filename(char *buf, unsigned char color1, unsigned char color2
 
 void __ATTR_NORETURN__ main(void) {
 	// The very first thing - set the power-hold pin low.
-	PORTC.OUTCLR = _BV(0);
+	PORTC.OUTSET = _BV(0);
 	PORTC.DIRSET = _BV(0);
 
 	// Next, take control of the LEDs.
