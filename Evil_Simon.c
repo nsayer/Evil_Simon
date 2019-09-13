@@ -151,7 +151,7 @@ static void __ATTR_NORETURN__ power_off(void) {
 	PORTD.OUTSET = 0xf0; // LEDs off
 	PORTD.OUTCLR = 0x7; // colors off too
 	eeprom_update_dword(EE_RAND_SEED, l_random(&rand_ctx));
-	PORTC.DIRCLR = _BV(0); // make the power pin Hi-Z. The pull-up will turn power off.
+	PORTC.OUTCLR = _BV(0); // power down and...
 	while(1) wdt_reset(); // wait patiently for death
 	__builtin_unreachable();
 }
@@ -329,7 +329,7 @@ static void sound_filename(char *buf, unsigned char color1, unsigned char color2
 }
 
 void __ATTR_NORETURN__ main(void) {
-	// The very first thing - set the power-hold pin low.
+	// The very first thing - set the power-hold pin high.
 	PORTC.OUTSET = _BV(0);
 	PORTC.DIRSET = _BV(0);
 
