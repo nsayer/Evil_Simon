@@ -6,9 +6,6 @@ OUT=Evil_Simon
 
 CHIP = atxmega32e5
 
-FLASH_TYPE=spi
-#FLASH_TYPE=sd
-
 CC = avr-gcc
 OBJCPY = avr-objcopy
 AVRDUDE = avrdude
@@ -25,7 +22,7 @@ all:	$(OUT).hex $(OUT).hex
 %.hex: %.elf
 	$(OBJCPY) -j .text -j .data -O ihex $^ $@
 
-Evil_Simon.elf: Evil_Simon.o random.o pff.o diskio_$(FLASH_TYPE).o
+Evil_Simon.elf: Evil_Simon.o random.o pff.o diskio_spi.o
 
 %.elf: %.o
 	$(CC) $(CFLAGS) -o $@ $^

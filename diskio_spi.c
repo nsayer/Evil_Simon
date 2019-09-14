@@ -23,9 +23,11 @@
 // skeleton for SPI flash chip I/O.
 
 #include <avr/io.h>
-#include <avr/wdt.h>
 #include "diskio.h"
-#include "Evil_Simon.h"
+
+// Port C pin 4 is the flash chip !CS pin.
+#define ASSERT_CS (PORTC.OUTCLR = _BV(4))
+#define DEASSERT_CS (PORTC.OUTSET = _BV(4))
 
 static inline __attribute__ ((always_inline)) unsigned char SPI_byte(unsigned char data) {
 	SPIC.DATA = data;

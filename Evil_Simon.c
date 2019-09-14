@@ -31,8 +31,11 @@
 #include <stdio.h>
 #include <string.h>
 #include "pff.h"
-#include "Evil_Simon.h"
 #include "random.h"
+
+// how many times does ticks() increment per second?
+// Keep this synced with the configuration of Timer C4!
+#define F_TICK (8000UL)
 
 // EEPROM layout
 // 0-3: random seed
@@ -368,8 +371,8 @@ void __ATTR_NORETURN__ main(void) {
 	PORTA.PIN6CTRL = PORT_OPC_PULLUP_gc;
 	PORTA.PIN7CTRL = PORT_OPC_PULLUP_gc;
 
-	PORTC.OUTSET = _BV(4); // !SD_CS defaults to high
-	PORTC.DIRSET = _BV(4) | _BV(5) | _BV(7); // !SD_CS and most of SPI is output
+	PORTC.OUTSET = _BV(4); // !CS defaults to high
+	PORTC.DIRSET = _BV(4) | _BV(5) | _BV(7); // !CS and most of SPI is output
 
 	// TCC4 is an 8 kHz clock for triggering DMA to the DAC for audio
 	// playback. It's also a tick counter for events and stuff.
