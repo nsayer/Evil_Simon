@@ -48,7 +48,7 @@ speed up the playback a little bit.
 Depending on the difficulty level of the game, the sounds and the positions may not remain consistent. However, in every case,
 it is the *color* that you must match.
 
-To begin the game, first press a button to wake Симон up (if the lights are out). It will show the 4 colors racing around in a circle. Press one or more
+To begin the game, first press a button to wake Симон up (if the lights are out). It will show the 4 colors pulsing. This is your invitation to start a game. Press one or more
 buttons to select a level of difficulty:
 
 * Green is easy - it's normal Simon. No tricky stuff. The colors never move and the sounds are consistent.
@@ -59,3 +59,4 @@ will be randomized at the start of the player's turn.
 * The "impossible" level is activated by pressing any two buttons to start. Here the button colors are
 randomized at every step during the player's turn.
 
+If you let Симон sit for 30 seconds waiting for a game to start, it will turn itself off.
