@@ -33,10 +33,6 @@
 #include "pff.h"
 #include "random.h"
 
-// how many times does ticks() increment per second?
-// Keep this synced with the configuration of Timer C4!
-#define F_TICK (8000UL)
-
 // EEPROM layout
 // 0-3: random seed
 #define EE_RAND_SEED ((void*)0)
@@ -57,7 +53,10 @@
 #define MOVE_SOUND(x) ((x >> 2) & 3)
 #define MOVE_COLOR(x) ((x >> 0) & 3)
 
-// F_TICK is defined in the .h file.
+// how many times does ticks() increment per second?
+// Keep this synced with the configuration of Timer C4!
+#define F_TICK (8000UL)
+
 // Debounce time is 50 ms
 #define DEBOUNCE_TICKS (F_TICK / 20)
 // While in attract mode, wait 30 seconds for a game and then go to sleep
@@ -161,7 +160,7 @@ static void __ATTR_NORETURN__ power_off(void) {
 
 static void __ATTR_NORETURN__ fail(unsigned char type) {
 	cli(); // No more rastering.
-	// announce the failure - white 4 bit binary value in white LEDs.
+	// announce the failure - write 4 bit binary value in white LEDs.
 	PORTD.OUTSET = 7;
 	PORTD.OUTCLR = 8;
 	PORTD.OUTSET = 0xf0;
