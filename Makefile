@@ -27,11 +27,18 @@ Evil_Simon.elf: Evil_Simon.o random.o pff.o diskio_spi.o
 %.elf: %.o
 	$(CC) $(CFLAGS) -o $@ $^
 
+init:	fuse flash seed
+
 clean:
 	rm -f *.hex *.elf *.o
 
 flash:	$(OUT).hex
 	$(AVRDUDE) $(DUDEOPTS) -c $(PROGRAMMER) -p $(CHIP) -U flash:w:$(OUT).hex
+
+seed:
+	dd if=/dev/urandom bs=16 count=1 of=seed
+	$(AVRDUDE) $(DUDEOPTS) -c $(PROGRAMMER) -p $(CHIP) -U eeperom:w:seed:r
+	rm -f seed
 
 # BODACT = 10, EESAVE=1, BODLVL=001 (2.8v)
 fuse:

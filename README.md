@@ -3,11 +3,11 @@
 
 This is the source code for https://hackaday.io/project/166766-Симон
 
-Note that this codebase includes Petit FAT FS. Petit FAT FS can be found at http://elm-chan.org/fsw/ff/00index_p.html
+Note that this codebase includes Petit FAT FS. Petit FAT FS can be found at http://elm-chan.org/fsw/ff/00index_p.html. It also contains PCG32, which can be found at http://www.pcg-random.org/download.html.
 
-The code I've written, exclusive of random.c and Petit FAT FS (but *inclusive* of the portion of diskio.c that is the actual code
+The code I've written, exclusive of pcg32 and Petit FAT FS (but *inclusive* of the portion of diskio.c that is the actual code
 that reads from flash), is licensed under GPL V2. That does not apply to Petit, of course, which remains covered by what
-is essentially an MIT license. Nor does it apply to random.c, which is a modified excerpt from Berkeley libc.
+is essentially an MIT license. Nor does it apply to pcg32, which is covered by Apache Licens 2.0.
 
 ## Setup
 

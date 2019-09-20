@@ -27,6 +27,7 @@
 #include <avr/eeprom.h>
 #include <util/atomic.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -34,7 +35,7 @@
 #include "random.h"
 
 // EEPROM layout
-// 0-3: random seed
+// 0-16: random seed
 #define EE_RAND_SEED ((void*)0)
 
 // For the LED raster system, these are the values to set in the display registers
@@ -93,7 +94,7 @@ unsigned long debounce_start;
 unsigned long start_max, lose_max, win_max;
 
 // random number seed
-unsigned long rand_ctx;
+pcg32_random_t rand_ctx;
 
 // PFF's structure
 FATFS fatfs;
@@ -152,7 +153,7 @@ static void __ATTR_NORETURN__ power_off(void) {
 	cli(); // no more rastering
 	PORTD.OUTSET = 0xf0; // LEDs off
 	PORTD.OUTCLR = 0x7; // colors off too
-	eeprom_update_dword(EE_RAND_SEED, l_random(&rand_ctx));
+	eeprom_update_block((void*)&rand_ctx, EE_RAND_SEED, sizeof(rand_ctx));
 	PORTC.OUTCLR = _BV(0); // power down and...
 	while(1) wdt_reset(); // wait patiently for death
 	__builtin_unreachable();
@@ -433,8 +434,10 @@ void __ATTR_NORETURN__ main(void) {
 	debounce_start = 0;
 
 	// Seed the PRNG from our last power-off state.
-	rand_ctx = eeprom_read_dword(EE_RAND_SEED);
-	l_random(&rand_ctx); // perturb it once
+	eeprom_read_block(&rand_ctx, EE_RAND_SEED, sizeof(rand_ctx));
+	pcg32_random_r(&rand_ctx); // perturb it once
+	// and update in case we lose power abruptly
+	eeprom_update_block((void*)&rand_ctx, EE_RAND_SEED, sizeof(rand_ctx));
 
 	// Release the hounds!
 	PMIC.CTRL = PMIC_LOLVLEN_bm | PMIC_MEDLVLEN_bm | PMIC_HILVLEN_bm;
@@ -539,7 +542,7 @@ void __ATTR_NORETURN__ main(void) {
 		}
 		{
 			char fname[9];
-			unsigned int n = (l_random(&rand_ctx) % start_max) + 1;
+			unsigned int n = pcg32_random_bound_r(&rand_ctx, start_max) + 1;
 			snprintf_P(fname, sizeof(fname), PSTR("START_%d"), n);
 			play_file(fname);
 		}
@@ -564,7 +567,7 @@ void __ATTR_NORETURN__ main(void) {
 				level = 0;
 				goto game_over;
 			}
-			pattern[level][0] = l_random(&rand_ctx) % 0x40; // from 0b000000 to 0b111111
+			pattern[level][0] = pcg32_random_bound_r(&rand_ctx, 0x40); // from 0b000000 to 0b111111
 			if (game_select < 1) { // At levels less than 1, the sounds become consistent.
 				// Copy the color to the sound
 				pattern[level][0] = (pattern[level][0] & 0b110011) | (MOVE_COLOR(pattern[level][0]) << 2);
@@ -573,12 +576,12 @@ void __ATTR_NORETURN__ main(void) {
 				// Copy the color to the position
 				pattern[level][0] = (pattern[level][0] & 0b001111) | (MOVE_COLOR(pattern[level][0]) << 4);
 			}
-			if (level < 5 || (l_random(&rand_ctx) % 10) > (3 + (level - 5) / 5)) // increasing probability as we go
+			if (level < 5 || pcg32_random_bound_r(&rand_ctx, 10) > (3 + (level - 5) / 5)) // increasing probability as we go
 				pattern[level][1] = 0xff; // the top two bits being 1 make this distinct from a move triad.
 			else {
 				do {
 					// make a chord move
-					pattern[level][1] = l_random(&rand_ctx) % 0x40; // from 0b000000 to 0b111111
+					pattern[level][1] = pcg32_random_bound_r(&rand_ctx, 0x40); // from 0b000000 to 0b111111
 					if (game_select < 1) { // At levels less than 1, the sounds become consistent.
 						// Copy the color to the sound
 						pattern[level][1] = (pattern[level][1] & 0b110011) | (MOVE_COLOR(pattern[level][1]) << 2);
@@ -619,7 +622,7 @@ void __ATTR_NORETURN__ main(void) {
 				if (game_select >= 4 || (game_select >= 3 && step == 0)) {
 					// do a 4 position knuth shuffle
 					for(int i = 0; i < 3; i++) {
-						int j = (l_random(&rand_ctx) % (4 - i)) + i; // random number i through 3 inclusive
+						int j = pcg32_random_bound_r(&rand_ctx, (4 - i)) + i; // random number i through 3 inclusive
 						unsigned char swap = home_row[i];
 						home_row[i] = home_row[j];
 						home_row[j] = swap;
@@ -688,7 +691,7 @@ game_over:
 			unsigned long lose_start = ticks();
 			{
 				char fname[9];
-				unsigned int n = (l_random(&rand_ctx) % lose_max) + 1;
+				unsigned int n = pcg32_random_bound_r(&rand_ctx, lose_max) + 1;
 				snprintf_P(fname, sizeof(fname), PSTR("LOSE_%d"), n);
 				play_file(fname);
 			}
@@ -709,7 +712,7 @@ game_over:
 			unsigned long win_start = ticks();
 			{
 				char fname[9];
-				unsigned int n = (l_random(&rand_ctx) % win_max) + 1;
+				unsigned int n = pcg32_random_bound_r(&rand_ctx, win_max) + 1;
 				snprintf_P(fname, sizeof(fname), PSTR("WIN_%d"), n);
 				play_file(fname);
 			}
