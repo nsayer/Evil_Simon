@@ -18,9 +18,6 @@ Build the code with the included Makefile, which assumes you have an avr-gcc wit
 it to the controller on the board with avrdude and a PDI capable programmer. Be sure to also set the fuses to set up the
 brownout detector.
 
-Note that there are two options for the audio storage: either SPI flash or an SD card. You should pick the appropriate option
-in the Makefile depending on your hardware.
-
 The flash ROM is loaded with a FAT12, FAT16 or FAT32 filesystem in an MBR partition table. The filesystem has the following
 files:
 
