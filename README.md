@@ -7,7 +7,7 @@ Note that this codebase includes Petit FAT FS. Petit FAT FS can be found at http
 
 The code I've written, exclusive of pcg32 and Petit FAT FS (but *inclusive* of the portion of diskio.c that is the actual code
 that reads from flash), is licensed under GPL V2. That does not apply to Petit, of course, which remains covered by what
-is essentially an MIT license. Nor does it apply to pcg32, which is covered by Apache Licens 2.0.
+is essentially an MIT license. Nor does it apply to pcg32, which is covered by Apache License 2.0.
 
 ## Setup
 
