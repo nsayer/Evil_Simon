@@ -37,7 +37,7 @@ flash:	$(OUT).hex
 
 seed:
 	dd if=/dev/urandom bs=16 count=1 of=seed
-	$(AVRDUDE) $(DUDEOPTS) -c $(PROGRAMMER) -p $(CHIP) -U eeperom:w:seed:r
+	$(AVRDUDE) $(DUDEOPTS) -c $(PROGRAMMER) -p $(CHIP) -U eeprom:w:seed:r
 	rm -f seed
 
 # BODACT = 10, EESAVE=1, BODLVL=001 (2.8v)
