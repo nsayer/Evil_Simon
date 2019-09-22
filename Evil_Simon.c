@@ -38,6 +38,9 @@
 // 0-16: random seed
 #define EE_RAND_SEED ((void*)0)
 
+// 17-22: high score per level
+#define EE_HIGH_SCORE ((void*)17)
+
 // For the LED raster system, these are the values to set in the display registers
 // This is also the "home" button order.
 #define BLACK (0)
@@ -562,7 +565,7 @@ void __ATTR_NORETURN__ main(void) {
 		// game loop
 		while(1) {
 			char fname[3];
-			if (level >= 250) {
+			if (level > 100) {
 				// I give up
 				level = 0;
 				goto game_over;
@@ -706,6 +709,32 @@ game_over:
 				}
 			}
 			blank_display();
+			level--; // what did they actually achieve?
+			unsigned char hi_score = eeprom_read_byte(EE_HIGH_SCORE + game_select);
+			if (hi_score == 0xff || hi_score < level) {
+				eeprom_write_byte(EE_HIGH_SCORE + game_select, level);
+				play_file(P("HI_SCORE"));
+			} else {
+				play_file(P("SCORE"));
+			}
+			while(audio_poll()); // wait it out
+			{
+				char fname[12];
+				if (level < 20) {
+					snprintf_P(fname, sizeof(fname), PSTR("NUMBERS/%d"), level);
+					play_file(fname);
+					while(audio_poll());
+				} else {
+					snprintf_P(fname, sizeof(fname), PSTR("NUMBERS/%d"), (level / 10) * 10); // twenty...
+					play_file(fname);
+					while(audio_poll());
+					if (level % 10) { // not if an even twenty
+						snprintf_P(fname, sizeof(fname), PSTR("NUMBERS/%d"), level % 10); // three
+						play_file(fname);
+						while(audio_poll());
+					}
+				}
+			}
 		} else {
 			// you win.
 			blank_display();
