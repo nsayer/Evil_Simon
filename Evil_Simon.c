@@ -481,6 +481,33 @@ void __ATTR_NORETURN__ main(void) {
 		
 	}
 
+	{
+		unsigned char count = 0, doit = 1;
+		for(int i = 0; i < 4; i++) {
+			if (last_button_state & (1 << i)) count++;
+		}
+		if (count > 1) {
+			// vulcan neck pinch - clear high scores
+			for(unsigned long now = ticks(); ticks() - now < F_TICK * 10; ) {
+				wdt_reset();
+				if ((ticks() - now) / (F_TICK / 5) % 2) {
+					blank_display();
+				} else {
+					for(int i = 0; i < 4; i++) disp_buf[i] = i + 1;
+				}
+				if (last_button_state != (((PORTA.IN & 0xf0) ^ 0xf0) >> 4)) {
+					doit = 0;
+					break;
+				}
+			}
+			if (doit) {
+				// clear high scores
+				for(int i = 0; i < 5; i++)
+					eeprom_write_byte(EE_HIGH_SCORE + i, 0xff);
+			}
+			blank_display();
+		}
+	}
 	while(1) {
 
 		// Attract mode - cycle the brightness up and down displaying the home colors

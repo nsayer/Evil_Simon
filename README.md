@@ -57,3 +57,6 @@ will be randomized at the start of the player's turn.
 randomized at every step during the player's turn.
 
 If you let Симон sit for 30 seconds waiting for a game to start, it will turn itself off.
+
+Симон keeps track of the high score for each level of difficulty and will let you know if you beat the previous record at the end of every (losing) game. To reset the high scores, hold down two buttons at once when Симон is off. It will wake up and begin blinking all 4 lights. Keep holding the buttons down for 10 seconds and when the lights start the normal "pulsing" pattern, the high scores have been reset.
+
