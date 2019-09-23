@@ -765,6 +765,7 @@ game_over:
 		} else {
 			// you win.
 			blank_display();
+			eeprom_write_byte(EE_HIGH_SCORE + game_select, level); // none shall pass.
 			unsigned long win_start = ticks();
 			{
 				char fname[9];
