@@ -24,7 +24,7 @@ files:
 * 1, 2, 3, 4: the sound files. When not scrambled, they are in order Red, Green, Blue, Yellow.
 * 12, 23, 34, 14, 13, 24: Sound files for chords - for each, it's the two given files from before mixed together.
 * WIN_n where n starts at 1 and counts arbitrarily high: the sound files played when the player manages to win, which is to say
-they get to a certain number of steps in the pattern (right now, that's 250, so it seems unlikely to ever happen). One is picked
+they get to a certain number of steps in the pattern (right now, that's 99, so it seems unlikely to ever happen). One is picked
 at random to play.
 * LOSE_n where n starts at 1 and counts arbitrarily high: the sound files played when the player loses. Like the WIN_ files, one
 of these is randomly selected to be played.
