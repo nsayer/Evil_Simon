@@ -34,6 +34,14 @@
 #include "pff.h"
 #include "random.h"
 
+// define for hardware > 1.3.4.
+//#define HAS_BATTERY_TEST
+
+#ifdef HAS_BATTERY_TEST
+// 2.2 out of 3.3 on a 2048 point scale
+#define ADC_BATT_THRESHOLD (1550)
+#endif
+
 // EEPROM layout
 // 0-16: random seed
 #define EE_RAND_SEED ((void*)0)
@@ -152,11 +160,13 @@ unsigned long inline __attribute__ ((always_inline)) ticks() {
 	return out;
 }
 
-static void __ATTR_NORETURN__ power_off(void) {
+// We normally do want to update the seed, but not when the battery is about to fail
+static void __ATTR_NORETURN__ power_off(unsigned char update_seed) {
 	cli(); // no more rastering
 	PORTD.OUTSET = 0xf0; // LEDs off
 	PORTD.OUTCLR = 0x7; // colors off too
-	eeprom_update_block((void*)&rand_ctx, EE_RAND_SEED, sizeof(rand_ctx));
+	if (update_seed)
+		eeprom_update_block((void*)&rand_ctx, EE_RAND_SEED, sizeof(rand_ctx));
 	PORTC.OUTCLR = _BV(0); // power down and...
 	while(1) wdt_reset(); // wait patiently for death
 	__builtin_unreachable();
@@ -334,6 +344,33 @@ static void sound_filename(char *buf, unsigned char color1, unsigned char color2
 	}
 }
 
+#ifdef HAS_BATTERY_TEST
+static __ATTR_NORETURN__ void battery_fail() {
+	// Blink one red light for a second, then power down
+	blank_display();
+	for(unsigned long now = ticks(); ticks() - now > F_TICK;) {
+		if (((ticks() - now) / (F_TICK / 8)) % 2) {
+			disp_buf[0] = RED;
+		} else {
+			blank_display();
+		}
+	}
+	power_off(0);
+	__builtin_unreachable();
+}
+
+static unsigned char check_battery() {
+	// Clear the complete flag
+	ADCA.CH0.INTFLAGS = ADC_CH_IF_bm;
+	// start ADC operation
+	ADCA.CH0.CTRL |= ADC_CH_START_bm;
+	// wait for ADC to finish
+	while(!(ADCA.CH0.INTFLAGS & ADC_CH_IF_bm)) ; // don't pet the watchdog - this should never take that long.
+	unsigned int adc_value = ADCA.CH0.RES;
+	return (adc_value > ADC_BATT_THRESHOLD);
+}
+#endif
+
 void __ATTR_NORETURN__ main(void) {
 	// The very first thing - set the power-hold pin high.
 	PORTC.OUTSET = _BV(0);
@@ -363,12 +400,20 @@ void __ATTR_NORETURN__ main(void) {
 
 	// Turn off the parts of the chip we don't use.
 	PR.PRGEN = PR_XCL_bm | PR_RTC_bm;
+#ifdef HAS_BATTERY_TEST
+	PR.PRPA = PR_AC_bm;
+#else
 	PR.PRPA = PR_ADC_bm | PR_AC_bm;
+#endif
 	PR.PRPC = PR_TWI_bm | PR_HIRES_bm | PR_USART0_bm | PR_TC5_bm;
 	PR.PRPD = PR_USART0_bm | PR_TC5_bm;
 
 	PORTA.DIRCLR = 0xff; // All of port A is inputs
-	PORTA.PIN2CTRL = PORT_ISC_INPUT_DISABLE_gc; //... except that pin 2 is DAC output
+#ifdef HAS_BATTERY_TEST
+	PORTA.PIN0CTRL = PORT_ISC_INPUT_DISABLE_gc; //... except that pin 0 is AREF
+	PORTA.PIN1CTRL = PORT_ISC_INPUT_DISABLE_gc; //... and pin 1 is the battery voltage input
+#endif
+	PORTA.PIN2CTRL = PORT_ISC_INPUT_DISABLE_gc; //... and pin 2 is DAC output
 	PORTA.PIN4CTRL = PORT_OPC_PULLUP_gc; // all of the buttons get pull-ups
 	PORTA.PIN5CTRL = PORT_OPC_PULLUP_gc;
 	PORTA.PIN6CTRL = PORT_OPC_PULLUP_gc;
@@ -428,6 +473,25 @@ void __ATTR_NORETURN__ main(void) {
 	EDMA.CH2.DESTADDR = (unsigned int)&(DACA.CH0DATA);
 	EDMA.CH2.ADDR = (unsigned int)&(audio_buf[1]);
 
+#ifdef HAS_BATTERY_TEST
+	ADCA.CTRLA = ADC_ENABLE_bm; // enable.
+
+	// Load factory calibration into the ADC
+	NVM.CMD = NVM_CMD_READ_CALIB_ROW_gc;
+	ADCA.CALL = pgm_read_byte(offsetof(NVM_PROD_SIGNATURES_t, ADCACAL0));
+	ADCA.CALH = pgm_read_byte(offsetof(NVM_PROD_SIGNATURES_t, ADCACAL1));
+	NVM.CMD = NVM_CMD_NO_OPERATION_gc;
+
+	ADCA.CTRLB = ADC_CONMODE_bm; // signed mode
+	ADCA.PRESCALER = ADC_PRESCALER_DIV256_gc; // ~116 kHz
+	ADCA.REFCTRL = ADC_REFSEL_AREFA_gc; // external reference
+	ADCA.EVCTRL = 0; // no event control
+	ADCA.CH0.CTRL = ADC_CH_INPUTMODE_DIFFWGAINL_gc; // differential, unity gain.
+	ADCA.CH0.MUXCTRL = ADC_CH_MUXPOS_PIN1_gc | ADC_CH_MUXNEGL_GND_gc; // input on pin A1, negative pad ground.
+	ADCA.CH0.INTCTRL = 0; // no interrupts
+	ADCA.CH0.AVGCTRL = (2 << ADC_CH_RIGHTSHIFT_gp) | ADC_SAMPNUM_4X_gc; // 4x oversampling
+#endif
+
 	// clear the display buffer
 	blank_display();
 
@@ -481,6 +545,10 @@ void __ATTR_NORETURN__ main(void) {
 		
 	}
 
+#ifdef HAS_BATTERY_TEST
+	if (!check_battery()) battery_fail();
+#endif
+
 	{
 		unsigned char count = 0, doit = 1;
 		for(int i = 0; i < 4; i++) {
@@ -522,11 +590,16 @@ void __ATTR_NORETURN__ main(void) {
 					// clear the display
 					blank_display();
 					// Zzzzzzz
-					power_off();
+					power_off(1);
 					__builtin_unreachable();
 				}
 				if (!((now - wait_start) % (F_TICK / 10))) {
-					if (++breath_cycle >= 0x10) breath_cycle = 0;
+					if (++breath_cycle >= 0x10) {
+#ifdef HAS_BATTERY_TEST
+						if (!check_battery()) battery_fail();
+#endif
+						breath_cycle = 0;
+					}
 					// We want the brightness to go from 0 to 7 and back to 0
 					unsigned char brightness = (breath_cycle > 7)?16 - breath_cycle:breath_cycle;
 					for(int i = 0; i < 4; i++) {
@@ -591,6 +664,9 @@ void __ATTR_NORETURN__ main(void) {
 
 		// game loop
 		while(1) {
+#ifdef HAS_BATTERY_TEST
+			if (!check_battery()) battery_fail();
+#endif
 			char fname[3];
 			if (level > 100) {
 				// I give up
