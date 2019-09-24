@@ -38,8 +38,8 @@
 //#define HAS_BATTERY_TEST
 
 #ifdef HAS_BATTERY_TEST
-// 2.2 out of 3.3 on a 2048 point scale
-#define ADC_BATT_THRESHOLD (1550)
+// About 2.21 volts or so
+#define AC_BATT_THRESHOLD (41)
 #endif
 
 // EEPROM layout
@@ -348,7 +348,7 @@ static void sound_filename(char *buf, unsigned char color1, unsigned char color2
 static __ATTR_NORETURN__ void battery_fail() {
 	// Blink one red light for a second, then power down
 	blank_display();
-	for(unsigned long now = ticks(); ticks() - now > F_TICK;) {
+	for(unsigned long now = ticks(); ticks() - now < F_TICK;) {
 		if (((ticks() - now) / (F_TICK / 8)) % 2) {
 			disp_buf[0] = RED;
 		} else {
@@ -359,15 +359,8 @@ static __ATTR_NORETURN__ void battery_fail() {
 	__builtin_unreachable();
 }
 
-static unsigned char check_battery() {
-	// Clear the complete flag
-	ADCA.CH0.INTFLAGS = ADC_CH_IF_bm;
-	// start ADC operation
-	ADCA.CH0.CTRL |= ADC_CH_START_bm;
-	// wait for ADC to finish
-	while(!(ADCA.CH0.INTFLAGS & ADC_CH_IF_bm)) ; // don't pet the watchdog - this should never take that long.
-	unsigned int adc_value = ADCA.CH0.RES;
-	return (adc_value > ADC_BATT_THRESHOLD);
+static inline unsigned char check_battery() {
+	return (ACA.STATUS & AC_AC0STATE_bm) != 0;
 }
 #endif
 
@@ -401,7 +394,7 @@ void __ATTR_NORETURN__ main(void) {
 	// Turn off the parts of the chip we don't use.
 	PR.PRGEN = PR_XCL_bm | PR_RTC_bm;
 #ifdef HAS_BATTERY_TEST
-	PR.PRPA = PR_AC_bm;
+	PR.PRPA = PR_ADC_bm;
 #else
 	PR.PRPA = PR_ADC_bm | PR_AC_bm;
 #endif
@@ -410,8 +403,7 @@ void __ATTR_NORETURN__ main(void) {
 
 	PORTA.DIRCLR = 0xff; // All of port A is inputs
 #ifdef HAS_BATTERY_TEST
-	PORTA.PIN0CTRL = PORT_ISC_INPUT_DISABLE_gc; //... except that pin 0 is AREF
-	PORTA.PIN1CTRL = PORT_ISC_INPUT_DISABLE_gc; //... and pin 1 is the battery voltage input
+	PORTA.PIN1CTRL = PORT_ISC_INPUT_DISABLE_gc; //... except that pin 1 is the battery voltage input
 #endif
 	PORTA.PIN2CTRL = PORT_ISC_INPUT_DISABLE_gc; //... and pin 2 is DAC output
 	PORTA.PIN4CTRL = PORT_OPC_PULLUP_gc; // all of the buttons get pull-ups
@@ -474,22 +466,14 @@ void __ATTR_NORETURN__ main(void) {
 	EDMA.CH2.ADDR = (unsigned int)&(audio_buf[1]);
 
 #ifdef HAS_BATTERY_TEST
-	ADCA.CTRLA = ADC_ENABLE_bm; // enable.
-
-	// Load factory calibration into the ADC
-	NVM.CMD = NVM_CMD_READ_CALIB_ROW_gc;
-	ADCA.CALL = pgm_read_byte(offsetof(NVM_PROD_SIGNATURES_t, ADCACAL0));
-	ADCA.CALH = pgm_read_byte(offsetof(NVM_PROD_SIGNATURES_t, ADCACAL1));
-	NVM.CMD = NVM_CMD_NO_OPERATION_gc;
-
-	ADCA.CTRLB = ADC_CONMODE_bm; // signed mode
-	ADCA.PRESCALER = ADC_PRESCALER_DIV256_gc; // ~116 kHz
-	ADCA.REFCTRL = ADC_REFSEL_AREFA_gc; // external reference
-	ADCA.EVCTRL = 0; // no event control
-	ADCA.CH0.CTRL = ADC_CH_INPUTMODE_DIFFWGAINL_gc; // differential, unity gain.
-	ADCA.CH0.MUXCTRL = ADC_CH_MUXPOS_PIN1_gc | ADC_CH_MUXNEGL_GND_gc; // input on pin A1, negative pad ground.
-	ADCA.CH0.INTCTRL = 0; // no interrupts
-	ADCA.CH0.AVGCTRL = (2 << ADC_CH_RIGHTSHIFT_gp) | ADC_SAMPNUM_4X_gc; // 4x oversampling
+	ACA.AC0CTRL = AC_HYSMODE_SMALL_gc; // no interrupts, hysteresis.
+	ACA.AC1CTRL = 0; // disable AC1.
+	ACA.AC0MUXCTRL = AC_MUXPOS_PIN1_gc | AC_MUXNEG_SCALER_gc; // compare pin 1 to voltage scaler
+	ACA.CTRLA = 0; // no special config
+	ACA.CTRLB = AC_BATT_THRESHOLD << AC_SCALEFAC_gp;
+	ACA.WINCTRL = 0; // no window
+	ACA.CURRCTRL = 0; // no CC source
+	ACA.AC0CTRL |= AC_ENABLE_bm; // turn it on
 #endif
 
 	// clear the display buffer
@@ -576,6 +560,7 @@ void __ATTR_NORETURN__ main(void) {
 			blank_display();
 		}
 	}
+
 	while(1) {
 
 		// Attract mode - cycle the brightness up and down displaying the home colors
