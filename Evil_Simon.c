@@ -570,6 +570,9 @@ void __ATTR_NORETURN__ main(void) {
 			unsigned char breath_cycle = 0;
 			while(1) {
 				wdt_reset();
+#ifdef HAS_BATTERY_TEST
+				if (!check_battery()) battery_fail();
+#endif
 				unsigned long now = ticks();
 				if (now - wait_start > SLEEP_TIMEOUT) {
 					// clear the display
@@ -580,9 +583,6 @@ void __ATTR_NORETURN__ main(void) {
 				}
 				if (!((now - wait_start) % (F_TICK / 10))) {
 					if (++breath_cycle >= 0x10) {
-#ifdef HAS_BATTERY_TEST
-						if (!check_battery()) battery_fail();
-#endif
 						breath_cycle = 0;
 					}
 					// We want the brightness to go from 0 to 7 and back to 0
