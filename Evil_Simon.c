@@ -349,6 +349,7 @@ static __ATTR_NORETURN__ void battery_fail() {
 	// Blink one red light for a second, then power down
 	blank_display();
 	for(unsigned long now = ticks(); ticks() - now < F_TICK;) {
+		wdt_reset();
 		if (((ticks() - now) / (F_TICK / 8)) % 2) {
 			disp_buf[0] = RED;
 		} else {
