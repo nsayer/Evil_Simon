@@ -172,26 +172,6 @@ static void __ATTR_NORETURN__ power_off(unsigned char update_seed) {
 	__builtin_unreachable();
 }
 
-#ifdef HAS_BATTERY_TEST
-ISR(ACA_AC0_vect) {
-	// Stop audio immediately.
-	DACA.CTRLA &= ~(DAC_CH0EN_bm);
-	EDMA.CTRL = EDMA_RESET_bm;
-	// Blink one red light for a second, then power down
-	blank_display();
-	for(unsigned long now = ticks(); ticks() - now < F_TICK;) {
-		wdt_reset();
-		if (((ticks() - now) / (F_TICK / 8)) % 2) {
-			disp_buf[0] = RED;
-		} else {
-			blank_display();
-		}
-	}
-	power_off(0);
-	__builtin_unreachable();
-}
-#endif
-
 static void __ATTR_NORETURN__ fail(unsigned char type) {
 	cli(); // No more rastering.
 	// announce the failure - write 4 bit binary value in white LEDs.
@@ -364,6 +344,26 @@ static void sound_filename(char *buf, unsigned char color1, unsigned char color2
 	}
 }
 
+#ifdef HAS_BATTERY_TEST
+static __ATTR_NORETURN__ void battery_fail() {
+	// Blink one red light for a second, then power down
+	blank_display();
+	for(unsigned long now = ticks(); ticks() - now < F_TICK;) {
+		if (((ticks() - now) / (F_TICK / 8)) % 2) {
+			disp_buf[0] = RED;
+		} else {
+			blank_display();
+		}
+	}
+	power_off(0);
+	__builtin_unreachable();
+}
+
+static inline unsigned char check_battery() {
+	return (ACA.STATUS & AC_AC0STATE_bm) != 0;
+}
+#endif
+
 void __ATTR_NORETURN__ main(void) {
 	// The very first thing - set the power-hold pin high.
 	PORTC.OUTSET = _BV(0);
@@ -466,7 +466,7 @@ void __ATTR_NORETURN__ main(void) {
 	EDMA.CH2.ADDR = (unsigned int)&(audio_buf[1]);
 
 #ifdef HAS_BATTERY_TEST
-	ACA.AC0CTRL = AC_INTMODE_FALLING_gc | AC_INTLVL_LO_gc | AC_HYSMODE_SMALL_gc; // Interrupt on falling
+	ACA.AC0CTRL = AC_HYSMODE_SMALL_gc; // no interrupts, hysteresis.
 	ACA.AC1CTRL = 0; // disable AC1.
 	ACA.AC0MUXCTRL = AC_MUXPOS_PIN1_gc | AC_MUXNEG_SCALER_gc; // compare pin 1 to voltage scaler
 	ACA.CTRLA = 0; // no special config
@@ -474,7 +474,6 @@ void __ATTR_NORETURN__ main(void) {
 	ACA.WINCTRL = 0; // no window
 	ACA.CURRCTRL = 0; // no CC source
 	ACA.AC0CTRL |= AC_ENABLE_bm; // turn it on
-	ACA.STATUS = AC_AC0IF_bm; // Force it clear
 #endif
 
 	// clear the display buffer
@@ -530,6 +529,10 @@ void __ATTR_NORETURN__ main(void) {
 		
 	}
 
+#ifdef HAS_BATTERY_TEST
+	if (!check_battery()) battery_fail();
+#endif
+
 	{
 		unsigned char count = 0, doit = 1;
 		for(int i = 0; i < 4; i++) {
@@ -567,6 +570,9 @@ void __ATTR_NORETURN__ main(void) {
 			unsigned char breath_cycle = 0;
 			while(1) {
 				wdt_reset();
+#ifdef HAS_BATTERY_TEST
+				if (!check_battery()) battery_fail();
+#endif
 				unsigned long now = ticks();
 				if (now - wait_start > SLEEP_TIMEOUT) {
 					// clear the display
@@ -643,6 +649,9 @@ void __ATTR_NORETURN__ main(void) {
 
 		// game loop
 		while(1) {
+#ifdef HAS_BATTERY_TEST
+			if (!check_battery()) battery_fail();
+#endif
 			char fname[3];
 			if (level > 100) {
 				// I give up
