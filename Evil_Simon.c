@@ -753,7 +753,7 @@ void __ATTR_NORETURN__ main(void) {
 							button2 = i;
 					}
 				}
-				move1 = home_row[button1]; // translate it into its displayed color
+				if (button1 != 0xff) move1 = home_row[button1]; // translate it into its displayed color
 				if (button2 != 0xff) move2 = home_row[button2];
 				if (pattern[step][1] == 0xff) {
 					// Single expected
