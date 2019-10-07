@@ -241,6 +241,11 @@ static unsigned char audio_poll(void) {
 		// playback all the way done.
 		if ((EDMA.STATUS & (EDMA_CH2BUSY_bm | EDMA_CH0BUSY_bm)) == 0) {
 			DACA.CTRLA &= ~(DAC_CH0EN_bm);
+#ifdef HAS_BATTERY_CHECK
+			// The battery is allowed to go low during audio
+			// but it eventually has to come back.
+			check_battery();
+#endif
 			audio_playing = 0;
 		}
 		return audio_playing;
@@ -346,9 +351,7 @@ static void sound_filename(char *buf, unsigned char color1, unsigned char color2
 }
 
 #ifdef HAS_BATTERY_TEST
-ISR(ACA_AC0_vect) {
-	if (audio_playing) return; // audio causes surges we need to ignore.
-
+static void __ATTR_NORETURN__ battery_fail() {
 	// Blink one red light for a second, then power down
 	blank_display();
 	for(unsigned long now = ticks(); ticks() - now < F_TICK;) {
@@ -362,6 +365,16 @@ ISR(ACA_AC0_vect) {
 	power_off(0);
 	__builtin_unreachable();
 }
+
+ISR(ACA_AC0_vect) {
+	if (audio_playing) return; // audio causes surges we need to ignore.
+	battery_fail();
+}
+
+static inline __attribute__ ((always_inline)) void check_battery() {
+	if ((ACA.STATUS & AC_AC0STATE_bm) == 0) battery_fail();
+}
+
 #endif
 
 void __ATTR_NORETURN__ main(void) {
@@ -502,6 +515,8 @@ void __ATTR_NORETURN__ main(void) {
 		if ((ACA.STATUS & AC_AC0STATE_bm) != 0) break;
 	ACA.STATUS |= AC_AC0IF_bm;
 	ACA.AC0CTRL |= AC_INTMODE_FALLING_gc | AC_INTLVL_LO_gc;
+	// if it's still low, then it's a failure
+	check_battery();
 #endif
 
 	if (pf_mount(&fatfs) != FR_OK) {
