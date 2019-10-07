@@ -96,7 +96,8 @@ volatile unsigned char disp_buf[4];
 volatile unsigned char audio_buf[2][512];
 
 volatile unsigned long ticks_cnt;
-unsigned char more_audio, audio_playing;
+volatile unsigned char audio_playing;
+unsigned char more_audio;
 
 unsigned char last_button_state;
 unsigned long debounce_start;
@@ -345,7 +346,9 @@ static void sound_filename(char *buf, unsigned char color1, unsigned char color2
 }
 
 #ifdef HAS_BATTERY_TEST
-static __ATTR_NORETURN__ void battery_fail() {
+ISR(ACA_AC0_vect) {
+	if (audio_playing) return; // audio causes surges we need to ignore.
+
 	// Blink one red light for a second, then power down
 	blank_display();
 	for(unsigned long now = ticks(); ticks() - now < F_TICK;) {
@@ -358,10 +361,6 @@ static __ATTR_NORETURN__ void battery_fail() {
 	}
 	power_off(0);
 	__builtin_unreachable();
-}
-
-static inline unsigned char check_battery() {
-	return (ACA.STATUS & AC_AC0STATE_bm) != 0;
 }
 #endif
 
@@ -468,8 +467,9 @@ void __ATTR_NORETURN__ main(void) {
 
 #ifdef HAS_BATTERY_TEST
 	ACA.AC0CTRL = AC_HYSMODE_SMALL_gc; // no interrupts, hysteresis.
-	ACA.AC1CTRL = 0; // disable AC1.
 	ACA.AC0MUXCTRL = AC_MUXPOS_PIN1_gc | AC_MUXNEG_SCALER_gc; // compare pin 1 to voltage scaler
+	ACA.AC1CTRL = 0; // disable AC1.
+	ACA.AC1MUXCTRL = 0;
 	ACA.CTRLA = 0; // no special config
 	ACA.CTRLB = AC_BATT_THRESHOLD << AC_SCALEFAC_gp;
 	ACA.WINCTRL = 0; // no window
@@ -494,6 +494,15 @@ void __ATTR_NORETURN__ main(void) {
 	// Release the hounds!
 	PMIC.CTRL = PMIC_LOLVLEN_bm | PMIC_MEDLVLEN_bm | PMIC_HILVLEN_bm;
 	sei();
+
+#ifdef HAS_BATTERY_TEST
+	// At startup when the battery's low, we should give it
+	// a little bit of grace... but not forever.
+	for(unsigned long wait = ticks(); ticks() - wait < 4;)
+		if ((ACA.STATUS & AC_AC0STATE_bm) != 0) break;
+	ACA.STATUS |= AC_AC0IF_bm;
+	ACA.AC0CTRL |= AC_INTMODE_FALLING_gc | AC_INTLVL_LO_gc;
+#endif
 
 	if (pf_mount(&fatfs) != FR_OK) {
 		fail(1);
@@ -529,10 +538,6 @@ void __ATTR_NORETURN__ main(void) {
 		}
 		
 	}
-
-#ifdef HAS_BATTERY_TEST
-	if (!check_battery()) battery_fail();
-#endif
 
 	{
 		unsigned char count = 0, doit = 1;
@@ -571,9 +576,6 @@ void __ATTR_NORETURN__ main(void) {
 			unsigned char breath_cycle = 0;
 			while(1) {
 				wdt_reset();
-#ifdef HAS_BATTERY_TEST
-				if (!check_battery()) battery_fail();
-#endif
 				unsigned long now = ticks();
 				if (now - wait_start > SLEEP_TIMEOUT) {
 					// clear the display
@@ -650,9 +652,6 @@ void __ATTR_NORETURN__ main(void) {
 
 		// game loop
 		while(1) {
-#ifdef HAS_BATTERY_TEST
-			if (!check_battery()) battery_fail();
-#endif
 			char fname[3];
 			if (level > 100) {
 				// I give up
