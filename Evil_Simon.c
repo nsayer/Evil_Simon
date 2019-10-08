@@ -821,22 +821,22 @@ game_over:
 			} else {
 				play_file(P("SCORE"));
 			}
+
 			while(audio_poll()); // wait it out
-			{
-				char fname[12];
-				if (level < 20) {
-					snprintf_P(fname, sizeof(fname), PSTR("NUMBERS/%d"), level);
+
+			char fname[12];
+			if (level < 20) {
+				snprintf_P(fname, sizeof(fname), PSTR("NUMBERS/%d"), level);
+				play_file(fname);
+				while(audio_poll());
+			} else {
+				snprintf_P(fname, sizeof(fname), PSTR("NUMBERS/%d"), (level / 10) * 10); // twenty...
+				play_file(fname);
+				while(audio_poll());
+				if (level % 10) { // not if an even twenty
+					snprintf_P(fname, sizeof(fname), PSTR("NUMBERS/%d"), level % 10); // three
 					play_file(fname);
 					while(audio_poll());
-				} else {
-					snprintf_P(fname, sizeof(fname), PSTR("NUMBERS/%d"), (level / 10) * 10); // twenty...
-					play_file(fname);
-					while(audio_poll());
-					if (level % 10) { // not if an even twenty
-						snprintf_P(fname, sizeof(fname), PSTR("NUMBERS/%d"), level % 10); // three
-						play_file(fname);
-						while(audio_poll());
-					}
 				}
 			}
 		} else {
