@@ -190,7 +190,7 @@ static size_t read_audio(void* buf, size_t len) {
 	unsigned int cnt;
 	if (pf_read(buf, len / 2, &cnt) != FR_OK) {
 		// indicate an error
-		fail(3);
+		fail(4);
 	}
 	for(int i = cnt - 1; i >= 0; i--) {
 		unsigned int sample = ((unsigned char *)buf)[i];
@@ -534,7 +534,7 @@ void __ATTR_NORETURN__ main(void) {
 			fail(res);
 		while(1) {
 			if (pf_readdir(&dir, &file) != FR_OK)
-				fail(4);
+				fail(5);
 			if (file.fname[0] == 0) break; // we're done
 			if (!strncasecmp_P(file.fname, PSTR("WIN_"), 4)) {
 				unsigned int n = atoi(&(file.fname[4]));
