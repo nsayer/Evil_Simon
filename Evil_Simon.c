@@ -113,7 +113,7 @@ FATFS fatfs;
 
 // blank the display
 static inline __attribute__ ((always_inline)) void blank_display() {
-	memset(&disp_buf, 0, sizeof(disp_buf));
+	memset((void*)&disp_buf, 0, sizeof(disp_buf));
 }
 
 // ticks counter and display raster ISR
