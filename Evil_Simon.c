@@ -529,9 +529,8 @@ void __ATTR_NORETURN__ main(void) {
 	{
 		DIR dir;
 		FILINFO file;
-		FRESULT res;
-		if ((res = pf_opendir(&dir, P("/"))) != FR_OK)
-			fail(res);
+		if (pf_opendir(&dir, P("/")) != FR_OK)
+			fail(3);
 		while(1) {
 			if (pf_readdir(&dir, &file) != FR_OK)
 				fail(5);
