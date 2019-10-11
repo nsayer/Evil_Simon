@@ -35,7 +35,7 @@
 #include "random.h"
 
 // define for hardware > 1.3.4.
-//#define HAS_BATTERY_TEST
+#define HAS_BATTERY_TEST
 
 #ifdef HAS_BATTERY_TEST
 // About 2.21 volts or so
@@ -162,12 +162,10 @@ unsigned long inline __attribute__ ((always_inline)) ticks() {
 }
 
 // We normally do want to update the seed, but not when the battery is about to fail
-static void __ATTR_NORETURN__ power_off(unsigned char update_seed) {
+static void __ATTR_NORETURN__ power_off() {
 	cli(); // no more rastering
 	PORTD.OUTSET = 0xf0; // LEDs off
 	PORTD.OUTCLR = 0x7; // colors off too
-	if (update_seed)
-		eeprom_update_block((void*)&rand_ctx, EE_RAND_SEED, sizeof(rand_ctx));
 	PORTC.OUTCLR = _BV(0); // power down and...
 	while(1) wdt_reset(); // wait patiently for death
 	__builtin_unreachable();
@@ -362,7 +360,7 @@ static void __ATTR_NORETURN__ battery_fail() {
 			blank_display();
 		}
 	}
-	power_off(0);
+	power_off();
 	__builtin_unreachable();
 }
 
@@ -500,9 +498,12 @@ void __ATTR_NORETURN__ main(void) {
 
 	// Seed the PRNG from our last power-off state.
 	eeprom_read_block(&rand_ctx, EE_RAND_SEED, sizeof(rand_ctx));
-	pcg32_random_r(&rand_ctx); // perturb it once
-	// and update in case we lose power abruptly
-	eeprom_update_block((void*)&rand_ctx, EE_RAND_SEED, sizeof(rand_ctx));
+	// And now set up for the *next* power-up.
+	{
+		pcg32_random_t preseed;
+		pcg32_preseed(&rand_ctx, &preseed);
+		eeprom_update_block((void*)&preseed, EE_RAND_SEED, sizeof(rand_ctx));
+	}
 
 	// Release the hounds!
 	PMIC.CTRL = PMIC_LOLVLEN_bm | PMIC_MEDLVLEN_bm | PMIC_HILVLEN_bm;
@@ -596,7 +597,7 @@ void __ATTR_NORETURN__ main(void) {
 					// clear the display
 					blank_display();
 					// Zzzzzzz
-					power_off(1);
+					power_off();
 					__builtin_unreachable();
 				}
 				if (!((now - wait_start) % (F_TICK / 10))) {

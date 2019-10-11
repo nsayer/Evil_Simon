@@ -8,3 +8,5 @@ typedef struct { uint64_t state;  uint64_t inc; } pcg32_random_t;
 
 uint32_t pcg32_random_r(pcg32_random_t* rng);
 uint32_t pcg32_random_bound_r(pcg32_random_t* rng, uint32_t bound);
+// Do this at powerup to prepare for the next powerup
+void pcg32_preseed(pcg32_random_t* from, pcg32_random_t* to);
