@@ -80,6 +80,9 @@
 // There are 32 cycles in the raster system, so the maximum rate is 250 Hz.
 #define RASTER_RATE (1)
 
+// How long can a game be before we give up?
+#define MAX_LEVEL 100
+
 // Thanks to Gareth Evans at http://todbot.com/blog/2008/06/19/how-to-do-big-strings-in-arduino/
 // Note that you must be careful not to use this macro more than once per "statement", lest you
 // risk overwriting the buffer before it is used. So no using it inside methods that return
@@ -669,7 +672,7 @@ void __ATTR_NORETURN__ main(void) {
 		// game loop
 		while(1) {
 			char fname[3];
-			if (level > 100) {
+			if (level > MAX_LEVEL) {
 				// I give up
 				level = 0;
 				goto game_over;
@@ -842,7 +845,7 @@ game_over:
 		} else {
 			// you win.
 			blank_display();
-			eeprom_write_byte(EE_HIGH_SCORE + game_select, level); // none shall pass.
+			eeprom_write_byte(EE_HIGH_SCORE + game_select, MAX_LEVEL); // none shall pass.
 			unsigned long win_start = ticks();
 			{
 				char fname[9];
