@@ -69,8 +69,8 @@
 // Keep this synced with the configuration of Timer C4!
 #define F_TICK (8000UL)
 
-// Debounce time is 50 ms
-#define DEBOUNCE_TICKS (F_TICK / 20)
+// Debounce time is ~80 ms
+#define DEBOUNCE_TICKS (F_TICK / 12)
 // While in attract mode, wait 30 seconds for a game and then go to sleep
 #define SLEEP_TIMEOUT (F_TICK * 30)
 // While it's the player's turn, wait 10 seconds before giving up on him
