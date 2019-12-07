@@ -43,11 +43,11 @@
 #endif
 
 // EEPROM layout
-// 0-16: random seed
+// 0-15: random seed
 #define EE_RAND_SEED ((void*)0)
 
-// 17-22: high score per level
-#define EE_HIGH_SCORE ((void*)17)
+// 16-21: high score per level
+#define EE_HIGH_SCORE ((void*)16)
 
 // For the LED raster system, these are the values to set in the display registers
 // This is also the "home" button order.
@@ -427,6 +427,7 @@ void __ATTR_NORETURN__ main(void) {
 
 	PORTC.OUTSET = _BV(4); // !CS defaults to high
 	PORTC.DIRSET = _BV(4) | _BV(5) | _BV(7); // !CS and most of SPI is output
+	PORTC.PIN6CTRL = PORT_OPC_PULLUP_gc; // pull up on MISO because it's Hi-Z while !CS is high.
 
 	// TCC4 is an 8 kHz clock for triggering DMA to the DAC for audio
 	// playback. It's also a tick counter for events and stuff.
