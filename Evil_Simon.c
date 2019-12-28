@@ -717,7 +717,7 @@ void __ATTR_NORETURN__ main(void) {
 				// How long we show depends on how far we've gone.
 				// Start at 1.5 seconds, reduce by a quarter second every 2nd level, minimum 1/4 sec.
 				long play_time = ((F_TICK * 3) / 2) - ((level /2) * (F_TICK / 4));
-				if (play_time < (F_TICK / 4)) play_time = F_TICK / 4;
+				if (play_time < (long)(F_TICK / 4)) play_time = F_TICK / 4;
 				for(unsigned long start = ticks(); ticks() - start < play_time; ) audio_poll();
 				blank_display();
 				// pause 100 msec
