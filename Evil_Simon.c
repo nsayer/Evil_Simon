@@ -721,7 +721,7 @@ void __ATTR_NORETURN__ main(void) {
 				for(unsigned long start = ticks(); ticks() - start < play_time; ) audio_poll();
 				blank_display();
 				// pause 100 msec
-				for(unsigned long delay_start = ticks(); ticks() - delay_start > (F_TICK / 10); ) wdt_reset();
+				for(unsigned long delay_start = ticks(); ticks() - delay_start < (F_TICK / 10); ) wdt_reset();
 			}
 
 			// Their turn
